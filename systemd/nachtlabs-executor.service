@@ -1,0 +1,30 @@
+[Unit]
+Description=NachtLabs qualified native executor broker
+After=network-online.target postgresql.service
+Wants=network-online.target
+ConditionPathExists=/etc/nachtlabs/executor-qualification.json
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/nachtlabs
+EnvironmentFile=/etc/nachtlabs/executor.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/nachtlabs/.venv/bin/python -m nachtlabs.execution.broker
+Restart=on-failure
+RestartSec=10
+UMask=0077
+LockPersonality=true
+# Broker shares the host mount namespace so transient units see bounded tmpfs mounts.
+# Do not add mount-namespace hardening here without redesigning workspace handoff.
+# CAP_SYS_ADMIN is required only for bounded tmpfs workspace mounts.
+# The privileged broker is trusted; untrusted child commands run in separate units.
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1G
+TasksMax=64
+KillMode=control-group
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target

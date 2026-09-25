@@ -1,0 +1,16 @@
+{
+  "name": "nachtlabs", "private": true,
+  "engines": { "node": ">=24 <25", "pnpm": ">=10 <11" },
+  "scripts": {
+    "build": "pnpm --filter @nachtlabs/web build",
+    "dev": "pnpm --filter @nachtlabs/web dev",
+    "typecheck": "pnpm --filter @nachtlabs/web typecheck",
+    "lint": "pnpm --filter @nachtlabs/web lint",
+    "test": "pnpm --filter @nachtlabs/web test",
+    "test:e2e": "playwright test",
+    "format:check": "prettier --check apps/web packages/api-client tests/e2e",
+    "api:generate": "openapi-typescript docs/api/openapi.json -o packages/api-client/src/generated.d.ts"
+  },
+  "devDependencies": { "@playwright/test": "^1.51.0", "openapi-typescript": "^7.6.1", "prettier": "^3.5.0", "swagger-ui-dist": "^5.0.0" }
+}
+

@@ -1,0 +1,36 @@
+[Unit]
+Description=NachtLabs worker (email, heartbeat, explicitly requested provider discovery)
+After=network-online.target postgresql.service
+Wants=network-online.target
+[Service]
+Type=simple
+User=nachtlabs-worker
+Group=nachtlabs-worker
+SupplementaryGroups=nachtlabs-secrets
+WorkingDirectory=/opt/nachtlabs
+EnvironmentFile=/etc/nachtlabs/worker.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/nachtlabs/.venv/bin/python -m nachtlabs_worker.main
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/nachtlabs/worker
+UMask=0077
+MemoryMax=512M
+TasksMax=64
+CPUQuota=100%
+KillMode=control-group
+[Install]
+WantedBy=multi-user.target

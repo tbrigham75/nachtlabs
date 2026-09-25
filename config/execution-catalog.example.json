@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "runtime_root": "/opt/nachtlabs-runtime",
+  "allowed_addresses": [],
+  "repositories": {
+    "local-demo": {
+      "project_id": "REPLACE_WITH_PROJECT_UUID",
+      "mirror": "/var/lib/nachtlabs-executor/mirrors/demo.git",
+      "provider": "gitea",
+      "full_name": "example/demo",
+      "remote_url": "https://git.example.invalid/example/demo.git",
+      "remote_addresses": [],
+      "remote_allow_private": false
+    }
+  },
+  "agents": {},
+  "commands": {
+    "secret-scan": {
+      "argv": [
+        "/usr/local/bin/gitleaks",
+        "dir",
+        "/work",
+        "--config",
+        "/opt/checks/gitleaks.toml",
+        "--gitleaks-ignore-path",
+        "/dev/null",
+        "--ignore-gitleaks-allow",
+        "--no-banner",
+        "--redact",
+        "--exit-code",
+        "1"
+      ],
+      "network": false
+    },
+    "demo-doc": {
+      "argv": [
+        "/usr/bin/python3",
+        "/opt/checks/demo_doc.py"
+      ],
+      "network": false
+    }
+  },
+  "secret_scan": "secret-scan",
+  "holdout_commands": {},
+  "runtime_files": {
+    "/opt/checks/demo_doc.py": "REPLACE_WITH_SHA256",
+    "/usr/bin/python3": "REPLACE_WITH_SHA256",
+    "/usr/local/bin/gitleaks": "REPLACE_WITH_SHA256",
+    "/opt/checks/gitleaks.toml": "REPLACE_WITH_SHA256"
+  },
+  "allow_private_network": false
+}

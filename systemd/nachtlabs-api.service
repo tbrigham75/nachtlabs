@@ -1,0 +1,36 @@
+[Unit]
+Description=NachtLabs API
+After=network-online.target postgresql.service
+Wants=network-online.target
+[Service]
+Type=simple
+User=nachtlabs-api
+Group=nachtlabs-api
+SupplementaryGroups=nachtlabs-secrets
+WorkingDirectory=/opt/nachtlabs
+EnvironmentFile=/etc/nachtlabs/api.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/nachtlabs/.venv/bin/uvicorn nachtlabs_api.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --log-config /opt/nachtlabs/config/logging.json --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/nachtlabs/api
+UMask=0077
+MemoryMax=1G
+TasksMax=128
+CPUQuota=200%
+KillMode=control-group
+[Install]
+WantedBy=multi-user.target

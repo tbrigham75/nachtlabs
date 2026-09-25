@@ -1,0 +1,33 @@
+[project]
+name = "nachtlabs-workspace"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["nachtlabs-core", "nachtlabs-api", "nachtlabs-worker"]
+
+[tool.uv.workspace]
+members = ["packages/core", "apps/api", "apps/worker"]
+
+[tool.uv.sources]
+nachtlabs-core = { workspace = true }
+nachtlabs-api = { workspace = true }
+nachtlabs-worker = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8,<9", "pytest-cov>=6,<7", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-python-dateutil>=2.9", "httpx>=0.28,<1", "pip-audit>=2.8,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/core/tests", "apps/api/tests"]
+markers = ["integration: requires a dedicated PostgreSQL test database"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["nachtlabs", "nachtlabs_api", "nachtlabs_worker"]
+ignore_missing_imports = true

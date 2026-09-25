@@ -1,0 +1,25 @@
+\set ON_ERROR_STOP on
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO nachtlabs_api;
+GRANT INSERT,UPDATE,DELETE ON organizations,users,user_sessions,login_challenges,identity_tokens,projects,project_members,governance_documents,service_accounts,api_keys,rate_buckets TO nachtlabs_api;
+GRANT INSERT ON governance_versions,holdout_contents,governance_approvals,audit_events,mail_jobs TO nachtlabs_api;
+GRANT SELECT,INSERT,UPDATE ON worker_heartbeats TO nachtlabs_worker;
+GRANT SELECT,UPDATE ON mail_jobs TO nachtlabs_worker;
+GRANT SELECT,DELETE ON user_sessions,login_challenges,identity_tokens,rate_buckets TO nachtlabs_worker;
+REVOKE UPDATE,DELETE,TRUNCATE ON audit_events,governance_versions,governance_approvals FROM nachtlabs_api,nachtlabs_worker;
+GRANT SELECT,INSERT,UPDATE ON integration_connections,integration_probes,model_profiles,agent_configurations,project_integrations TO nachtlabs_api;
+GRANT SELECT ON integration_connections TO nachtlabs_worker;
+GRANT SELECT,UPDATE ON integration_probes TO nachtlabs_worker;
+GRANT INSERT ON audit_events TO nachtlabs_worker;
+GRANT SELECT ON projects,project_members,governance_documents,governance_versions,project_integrations,agent_configurations,model_profiles,project_policies,workflow_definitions,factory_controls,work_requests,runs,run_approvals,run_evidence,executor_jobs,incidents,users TO nachtlabs_worker;
+GRANT INSERT,UPDATE ON runs,work_requests,executor_jobs,incidents TO nachtlabs_worker;
+GRANT INSERT ON run_events,run_evidence,incident_events,notifications,recommendations,mail_jobs TO nachtlabs_worker;
+GRANT SELECT,INSERT,UPDATE ON project_policies,work_requests,runs,webhook_bindings,webhook_receipts,factory_controls,incidents,recommendations,notifications,saved_searches,retention_policies TO nachtlabs_api;
+GRANT INSERT ON workflow_definitions,run_events,run_approvals,run_evidence,incident_events TO nachtlabs_api;
+GRANT SELECT ON projects,project_members,governance_documents,governance_versions,holdout_contents,project_integrations,integration_connections,agent_configurations,model_profiles,project_policies,runs,work_requests,run_approvals,run_evidence,executor_jobs,factory_controls,users,retention_policies TO nachtlabs_executor;
+GRANT UPDATE ON executor_jobs,projects,runs TO nachtlabs_executor;
+GRANT INSERT ON run_events,audit_events TO nachtlabs_executor;
+REVOKE UPDATE,DELETE,TRUNCATE ON workflow_definitions,run_events,run_approvals,run_evidence,incident_events FROM nachtlabs_api,nachtlabs_worker,nachtlabs_executor;
+GRANT UPDATE ON work_requests TO nachtlabs_executor;
+GRANT SELECT ON organizations,retention_policies TO nachtlabs_worker;
+GRANT SELECT,INSERT,DELETE ON operational_events TO nachtlabs_worker;
+GRANT SELECT ON operational_events TO nachtlabs_api;

@@ -1,0 +1,34 @@
+[Unit]
+Description=NachtLabs web application
+After=network-online.target nachtlabs-api.service
+Wants=network-online.target
+[Service]
+Type=simple
+User=nachtlabs-web
+Group=nachtlabs-web
+WorkingDirectory=/opt/nachtlabs/apps/web/.next/standalone/apps/web
+EnvironmentFile=/etc/nachtlabs/web.env
+ExecStart=/usr/bin/node /opt/nachtlabs/apps/web/.next/standalone/apps/web/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/nachtlabs/web
+UMask=0077
+MemoryMax=1G
+TasksMax=128
+CPUQuota=200%
+KillMode=control-group
+# MemoryDenyWriteExecute intentionally omitted: Node V8 uses JIT memory.
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+"use client";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { api, ApiError, type User } from "@nachtlabs/api-client";
+import { AuthScreen } from "@/features/auth";
+import { Overview } from "@/features/overview";
+import { Projects, ProjectScreen } from "@/features/projects";
+import { SettingsScreen } from "@/features/settings";
+import { KeysScreen } from "@/features/keys";
+import { AuditScreen } from "@/features/audit";
+import { IntegrationsScreen } from "@/features/integrations";
+import { AgentsModelsScreen } from "@/features/agents-models";
+import { FactoryScreen } from "@/features/factory";
+import { MonitoringScreen } from "@/features/monitoring";
+import { Shell } from "./shell";
+import { Empty, ErrorNotice, Loading } from "./ui";
+const publicPaths=['/login','/setup','/forgot-password','/reset-password','/accept-invitation','/mfa/verify'];
+export function Screen() {
+ const path=usePathname();const router=useRouter();const publicPage=publicPaths.includes(path);
+ const me=useQuery({queryKey:['me'],queryFn:()=>api<User>('/auth/me'),enabled:!publicPage,refetchOnWindowFocus:true});
+ useEffect(()=>{if(!publicPage&&me.error instanceof ApiError&&me.error.status===401)router.replace('/login');if(me.data?.mfa_required&&!['/mfa/setup','/settings/security'].includes(path))router.replace('/mfa/setup');},[me.error,me.data,path,publicPage,router]);
+ if(publicPage)return <AuthScreen key={path} path={path}/>;
+ if(me.isPending)return <Loading/>;if(me.error)return <ErrorNotice error={me.error}/>;if(!me.data)return null;
+ const user=me.data;const parts=path.split('/').filter(Boolean);let content:React.ReactNode;
+ if(path==='/overview')content=<Overview user={user}/>;
+ else if(path==='/projects'||path==='/projects/new')content=<Projects user={user} create={path.endsWith('/new')}/>;
+ else if(parts[0]==='projects'&&parts[1])content=<ProjectScreen key={parts[1]} id={parts[1]} tab={parts[2]} user={user}/>;
+ else if(parts[0]==='settings'||path==='/mfa/setup')content=<SettingsScreen user={user} tab={path==='/mfa/setup'?'security':parts[1]??'general'}/>;
+ else if(path==='/api-keys')content=<KeysScreen user={user}/>;
+ else if(path==='/audit-log')content=<AuditScreen/>;
+ else if(parts[0]==='integrations')content=<IntegrationsScreen user={user} provider={parts[1]}/>;
+ else if(parts[0]==='agents-models')content=<AgentsModelsScreen user={user} provider={parts[1]}/>;
+ else if(["work-requests","runs","workflows","regressions"].includes(parts[0]))content=<FactoryScreen area={parts[0]} id={parts[1]} user={user}/>;
+ else if(["monitoring","incidents","logs","recommendations","notifications","retention"].includes(parts[0]))content=<MonitoringScreen area={parts[0]} id={parts[1]} user={user}/>;
+ else content=<Empty title="Page not found"/>;
+ return <Shell user={user}>{content}</Shell>;
+}

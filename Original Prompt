@@ -1,0 +1,1818 @@
+You are a senior staff-level full-stack engineer, platform architect, security engineer, UX designer, DevOps engineer, and technical writer. Build a production-quality, self-hosted web application named NachtLabs.
+
+NachtLabs is a web-based AI dark-factory control plane. It accepts software work requests, orchestrates AI coding agents, connects to source-control repositories, performs a governed workflow from plan through pull request, and provides deep monitoring, logs, alerts, auditability, and human-reviewed reliability recommendations.
+
+The application must feel like a premium developer tool and operations console. It must not be a generic CRUD admin dashboard, a prototype, a static mockup, or a collection of unconnected UI screens. Build functional vertical slices with real authentication, PostgreSQL persistence, permissions, API contracts, integrations, audit records, durable job state, logs, monitoring, and tests.
+
+NachtLabs is Linux-first. Its canonical development, testing, and production environment is Linux. It runs directly as native services managed by systemd. Version one must not require or include Docker, Docker Compose, Kubernetes, container images, container manifests, or container-runtime assumptions. Docker support may be evaluated later only after the core factory is stable.
+
+Do not create Git commits or push the NachtLabs application repository unless the operator explicitly asks you to do so. The operator will manually manage source control for NachtLabs itself. This does not apply to the product functionality: authorized NachtLabs runs must still be able to create branches, commits, pushes, and pull requests in connected target GitHub and Gitea repositories.
+
+============================================================
+1. PRODUCT DEFINITION
+============================================================
+
+Product name: NachtLabs
+
+Positioning:
+NachtLabs is a premium developer tool for safely orchestrating AI software-engineering work. It provides a central operations console and a robust API through which humans and authorized agents can submit work, observe progress, inspect evidence, configure integrations, and govern automated changes.
+
+Primary integration targets for the first release:
+- Hermes Agent
+- OpenCode
+- Direct Ollama server connections
+- GitHub
+- Gitea
+
+Create a provider-neutral architecture so other LLM providers, coding agents, Git hosts, CI systems, deployment systems, execution runners, notification services, and observability backends can be added later without redesigning the application.
+
+Initial operating posture:
+- Start with one organization, one project, one worker, and bounded concurrency of one active implementation run.
+- Allow the data model and architecture to support multiple organizations, projects, workers, and concurrent runs later.
+- Do not enable unattended schedules, automatic merges, automatic deployments, destructive actions, or elevated privilege workflows by default.
+- New projects begin in plan-approval-required, PR-only mode.
+- The first end-to-end goal is one small, bounded, safe change with recorded evidence—not broad autonomous development.
+
+Core user journey:
+1. An operator installs and runs NachtLabs on Linux as native systemd-managed services.
+2. The first created account automatically becomes the Owner.
+3. The Owner signs in and configures the organization and security policy.
+4. The Owner connects a local or remote Ollama server.
+5. The Owner configures Hermes Agent and/or OpenCode.
+6. The Owner connects a GitHub or Gitea repository.
+7. The Owner defines the project Mission and at least one Validation Journey.
+8. The Owner creates a structured work request in the web UI.
+9. NachtLabs validates the request, evaluates it against the Mission, and discovers the repository.
+10. NachtLabs produces an implementation plan, risk summary, affected-file estimate, test plan, acceptance-criteria mapping, Mission-alignment assessment, and Validation Journey impact assessment.
+11. The Owner or authorized Operator approves the plan.
+12. NachtLabs creates an isolated workspace and feature branch, delegates implementation to an enabled agent, runs configured validation, performs bounded repair attempts, runs independent verification, pushes the branch, and creates a GitHub or Gitea pull request.
+13. The user watches the run in real time and can inspect structured logs, tool calls, Git commits, tests, artifacts, model metadata, verification findings, approvals, and audit events.
+14. NachtLabs Monitoring & Insights detects recurring non-sensitive issues, explains evidence, recommends safe remediation, and requires human approval before applying any configuration-changing action.
+
+============================================================
+2. CORE FACTORY PRINCIPLES
+============================================================
+
+NachtLabs must prioritize trustworthy delivery over merely automated delivery.
+
+1. Bounded scope
+- Each project has a clear Mission, constraints, non-goals, safety boundaries, ownership model, and risk tolerance.
+- Agent work must be evaluated against the Mission before implementation and again before pull-request creation.
+- The system must stop or require human clarification when a request conflicts with a project Mission, violates constraints, or falls outside approved scope.
+
+2. Evidence over claims
+- An agent stating that work is complete is never sufficient evidence.
+- Completion requires recorded evidence appropriate to the project: tests, linting, type checks, security checks, acceptance criteria, Validation Journeys, independent verification, and human approvals where policy requires them.
+- The UI must clearly distinguish:
+  - agent claim
+  - automated validation evidence
+  - independent verification result
+  - human approval
+  - unresolved risk
+  - policy exception
+
+3. Separation of duties
+- The agent or model that implements a change must not be the only authority saying the change is correct.
+- Implement an independent verifier/judge stage that is separately configured from implementation whenever feasible.
+- The verifier reviews implementation output, test evidence, acceptance criteria, Mission alignment, and Validation Journey results.
+- A verifier may pass, pass with warnings, request bounded rework, fail, or require human review.
+- Independence can mean separate agent instances, distinct prompts, different model profiles, separate context windows, or a different provider.
+- Record the implementation identity and verification-independence configuration for every run.
+
+4. Validation Journeys
+- Every project can define executable user-focused acceptance scenarios named Validation Journeys.
+- A Validation Journey describes meaningful end-to-end outcomes, prerequisites, steps, expected results, evidence requirements, and execution method.
+- Journeys can run through browser automation, API tests, integration tests, scripts, external validation adapters, or authorized manual procedures.
+- Projects can mark journeys as required for a workflow, change class, pull request type, or release class.
+- Results, artifacts, screenshots, recordings, traces, and failures must attach to the relevant run and pull-request evidence.
+
+5. Holdout validation
+- Support optional holdout validation scenarios that are not exposed in the implementing agent’s standard prompt or normal context.
+- Use holdouts to reduce the risk that an agent merely optimizes for familiar visible tests.
+- Restrict holdout definition access to authorized roles and controlled verifier/execution services.
+- Do not expose protected holdout instructions in generic run logs, implementer prompts, PR summaries, model contexts, or non-authorized API responses.
+- Record holdout execution and high-level result while protecting test details.
+
+6. Safe autonomy
+- New projects begin with plan approval required, PR-only delivery, safe validation commands, bounded retries, and human review before merge.
+- Increase autonomy only after evidence of reliable outcomes and explicit project-policy changes.
+- Schedules, auto-merges, and deployments are disabled by default.
+- A human must explicitly enable these capabilities per project after observing successful end-to-end runs and reviewing quality, reliability, model-use, and safety evidence.
+
+7. Regression protection
+- Support a manually triggered regression workflow that reruns selected Validation Journeys, regression suites, and optionally holdouts against a selected branch, commit, merged PR range, or release candidate.
+- Include an optional scheduling framework, but leave scheduling disabled by default.
+- Regression failures may create alerts, incidents, or a draft NachtLabs work request.
+- Regression failures must not automatically alter code, merge a PR, deploy, modify policies, or create external changes outside standard approval workflow.
+
+============================================================
+3. NON-NEGOTIABLE ENGINEERING RULES
+============================================================
+
+Build a real, maintainable application.
+
+Do:
+- Implement real API endpoints, database models, migrations, authorization checks, frontend data fetching, validation, background jobs, integration adapters, and error handling.
+- Build incrementally in coherent milestones and keep the application runnable after every milestone.
+- Use durable, explicit PostgreSQL state for workflows, run status, approvals, audit events, API keys, integrations, secret metadata, configuration, monitoring events, Missions, Validation Journeys, holdouts, verification findings, and remediation history.
+- Use secure defaults.
+- Write architecture and operations documentation as the project evolves.
+- Include automated tests for essential business logic, permissions, API behavior, workflow transitions, secret masking, Git behavior, Mission enforcement, Validation Journey execution, holdout access control, verifier decisions, regression policy, and critical operational flows.
+- Use semantic design tokens and accessible UI patterns.
+- Make all code strongly typed where the language supports it.
+- Provide clean commands for installation, development, testing, linting, type checking, formatting, migrations, seed data, backup, restore, production startup, service installation, and health checks.
+- Use stable interfaces and dependency injection around external providers.
+- Store secrets encrypted at rest and never expose plaintext secrets after creation.
+- Use structured logs, telemetry correlation, and stable request/run/trace identifiers.
+- Preserve audit data independently from operational logs.
+- Update relevant documentation whenever behavior, architecture, configuration, operations, or security controls change.
+
+Do not:
+- Do not fake integrations with hard-coded “success” data in production code.
+- Do not place API keys, OAuth tokens, passwords, private keys, session secrets, credentials, or plaintext environment files in source control, browser local storage, logs, client-side bundles, screenshots, error responses, test fixtures, or generated artifacts.
+- Do not let the browser call Ollama, GitHub, Gitea, Hermes Agent, OpenCode, or sensitive third-party integrations directly.
+- Do not build monolithic unmaintainable components, routes, services, workers, or database modules.
+- Do not scatter literal color values throughout components. Use semantic design tokens.
+- Do not use unsafe shell execution without command allowlisting, isolated working directories, strict timeouts, bounded output, safe argument handling, process controls, and audit logging.
+- Do not let agents merge pull requests, deploy, alter authorization, change secrets, access unapproved network destinations, run destructive commands, or change protected policies without explicit policy and required human approval.
+- Do not automatically “self-improve” settings, prompts, credentials, workflows, source code, infrastructure, or production behavior from logs without a human approval record.
+- Do not claim a workflow stage was completed unless evidence was actually recorded.
+- Do not weaken security controls merely to make an integration easier.
+- Do not create Git commits or push the NachtLabs application repository unless the operator explicitly directs you to do so.
+
+When requirements are unclear:
+- Choose the safest well-reasoned default.
+- Record the decision in documentation or an Architecture Decision Record.
+- Prefer a production-safe implementation over a flashy but fragile one.
+
+============================================================
+4. REQUIRED TECHNOLOGY STACK
+============================================================
+
+Use this stack unless a dependency is demonstrably incompatible.
+
+Frontend:
+- Next.js with App Router.
+- TypeScript in strict mode.
+- React.
+- Tailwind CSS.
+- shadcn/ui or a similarly high-quality, accessible, source-controlled component foundation.
+- Lucide or equivalent modern icon library.
+- Typed API client generated from backend OpenAPI schema where practical.
+- React Hook Form plus Zod for forms and validation.
+- TanStack Query or equivalent for server-state caching, invalidation, background refresh, and mutation handling.
+- Server-Sent Events or WebSockets for live run progress and log streaming. Prefer Server-Sent Events if it produces a simpler reliable initial design.
+- An accessible charting library suited to operational dashboards.
+
+Backend:
+- Python.
+- FastAPI.
+- Pydantic v2.
+- SQLAlchemy 2.x.
+- Alembic.
+- PostgreSQL.
+- Clean controller/service/repository architecture. Route handlers remain thin.
+- Typed settings loaded from environment variables and validated at startup.
+- Explicit asynchronous/background-worker architecture for long-running jobs.
+
+Execution model:
+- API service handles HTTP, authentication, authorization, configuration, orchestration, event streaming, and API contracts.
+- Separate worker service performs long-running workflow stages.
+- Worker uses durable PostgreSQL-backed job state in version one.
+- Do not require Redis unless clearly necessary for a specific feature.
+- Create a queue abstraction so Redis/Celery/Dramatiq/Temporal-style execution can be added later.
+- Implement safe cancellation, timeout, retry, dead-letter/failure state, bounded output capture, idempotency, and resumability.
+- Start with one active implementation run per installation by default. Make concurrency configurable later through explicit policy and resource limits.
+
+Database:
+- PostgreSQL in all supported environments.
+- Use migrations for every schema change.
+- Use foreign keys, indexes, unique constraints, check constraints, transactions, and row-level concurrency protection where appropriate.
+- Keep immutable audit events separate from mutable operational records and high-volume application logs.
+- Establish backup and restore procedures from the beginning.
+
+Linux operations:
+- Linux is the canonical development, test, and production environment.
+- Use `uv` for Python dependency and environment management.
+- Use `pnpm` for Node.js dependencies.
+- Provide Makefile targets and shell scripts for setup, development, tests, linting, formatting, migrations, seed data, backup, restore, production build, service installation, health checks, and log access.
+- Document a supported Linux distribution family. Prefer Ubuntu Server LTS or Debian stable unless another choice is justified.
+- Use systemd as the service manager.
+- Assume Nginx or Caddy will provide reverse proxy and TLS termination.
+- Run every NachtLabs component as a dedicated non-root Linux service account.
+- Use least-privilege ownership and filesystem permissions.
+- Separate configuration, runtime, state, telemetry, artifact, and workspace directories.
+- Include hardened systemd unit templates named:
+  - `nachtlabs-api.service`
+  - `nachtlabs-worker.service`
+  - `nachtlabs-web.service`
+- Use relevant systemd hardening directives where compatible:
+  - `NoNewPrivileges=true`
+  - `PrivateTmp=true`
+  - `ProtectSystem=...`
+  - `ProtectHome=true` where compatible
+  - `ReadWritePaths=...`
+  - `RestrictAddressFamilies=...`
+  - `RestrictNamespaces=...`
+  - `LockPersonality=true`
+  - `MemoryDenyWriteExecute=true` where compatible
+  - CPU, memory, and task limits
+  - restart policies
+  - dependency ordering
+- Document hardening trade-offs required for agent execution and managed Git workspaces.
+- Use journald-compatible structured logging and provide clear log-access procedures.
+
+Suggested monorepo structure:
+
+nachtlabs/
+  apps/
+    web/                         # Next.js premium operator dashboard
+    api/                         # FastAPI control-plane API
+    worker/                      # Worker service / worker package
+  packages/
+    api-client/                  # Generated TypeScript client from OpenAPI
+    ui/                          # Shared UI components/design tokens if useful
+  docs/
+    architecture/
+    api/
+    operations/
+    security/
+    adr/
+  scripts/
+    setup.sh
+    dev.sh
+    test.sh
+    lint.sh
+    format.sh
+    migrate.sh
+    seed.sh
+    backup.sh
+    restore.sh
+    install-systemd.sh
+    healthcheck.sh
+    logs.sh
+  systemd/
+    nachtlabs-api.service
+    nachtlabs-worker.service
+    nachtlabs-web.service
+  config/
+    nachtlabs.example.env
+  .env.example
+  README.md
+  Makefile
+
+Do not over-engineer the monorepo. Keep it clean and practical.
+
+============================================================
+5. VISUAL DESIGN AND UX
+============================================================
+
+Design NachtLabs as a premium developer tool and intelligent operations console.
+
+The design should feel:
+- Modern, refined, and intentional.
+- Dense enough for operations work but not cluttered.
+- Fast and calm rather than flashy.
+- Built for developers, operators, and technical administrators.
+- Responsive and usable on desktop, laptop, tablet, and mobile.
+- Accessible, keyboard-friendly, and readable during long operations sessions.
+
+Avoid:
+- A generic Bootstrap-like admin dashboard.
+- Excessive gradients.
+- “Hacker” aesthetics that sacrifice usability.
+- Giant hero sections inside the authenticated application.
+- Oversized typography and excessive empty space.
+- Bright, unrestrained neon colors.
+- Reliance on color alone to communicate status.
+
+Implement:
+- Persistent, collapsible desktop sidebar.
+- Responsive mobile navigation drawer.
+- Polished top bar with organization/project context, global search or command palette, notification center, health indicator, and user menu.
+- Breadcrumbs where useful.
+- Command palette with keyboard shortcut support.
+- Clear empty states that guide users to concrete next actions.
+- Loading skeletons, realistic progress states, helpful errors, and recoverable failure views.
+- Fine but restrained motion for drawers, dialogs, stage transitions, status changes, and notifications.
+- Accessible forms, labels, help text, focus states, and contrast.
+- Semantic icon use.
+- Rich tables with search, sorting, filtering, saved views, column visibility controls, pagination or virtualized scrolling as appropriate, and row-detail navigation.
+- Detail pages with a main content panel and an activity/timeline/evidence rail where appropriate.
+
+Use a semantic design-token system based on variables such as:
+- `--background`
+- `--surface`
+- `--surface-raised`
+- `--surface-overlay`
+- `--foreground`
+- `--muted-foreground`
+- `--border`
+- `--primary`
+- `--primary-foreground`
+- `--secondary`
+- `--success`
+- `--warning`
+- `--danger`
+- `--info`
+- `--focus-ring`
+- `--chart-1` through `--chart-6`
+- consistent typography, spacing, radii, shadows, elevations, and transitions
+
+Never scatter literal hex values through UI components. Components must use semantic tokens.
+
+============================================================
+6. THEMING
+============================================================
+
+Theme support is a core product feature.
+
+Implement six complete themes. Persist the selected theme per user. Support system preference when configured. Themes must apply consistently across all application components, code/log viewers, charts, tables, modals, empty states, toasts, status indicators, focus states, and data visualizations.
+
+Required themes:
+1. Midnight Operations
+   - Default dark theme.
+   - Deep slate/navy surfaces.
+   - Cool blue primary actions.
+   - Restrained cyan/green health signals.
+
+2. Graphite
+   - Neutral near-black/gray premium theme.
+   - Minimal visual noise.
+   - Excellent for dense operational data and long log-reading sessions.
+
+3. Light Canvas
+   - Clean warm-white professional light theme.
+   - Charcoal text with disciplined blue actions.
+   - Strong contrast without harshness.
+
+4. Forest Terminal
+   - Dark charcoal and deep green operations theme.
+   - Muted professional terminal-inspired accents.
+   - Must remain accessible and non-eye-straining.
+
+5. Nordic Frost
+   - Cool light blue-gray theme.
+   - Calm clean data-friendly aesthetic.
+
+6. Solarized Workshop
+   - Low-glare warm dark theme inspired by balanced solarized color relationships.
+   - Muted amber and blue accents.
+
+Add a Theme page or user-preference control that:
+- Shows all themes with real previews.
+- Lets users choose a theme.
+- Persists selection.
+- Supports a “Follow system” option if feasible.
+- Documents how future organizational themes can be added.
+
+============================================================
+7. AUTHENTICATION AND AUTHORIZATION
+============================================================
+
+Authentication requirements:
+- Local email/username and password authentication.
+- Secure password hashing using a modern trusted algorithm such as Argon2id.
+- Secure password-reset flow.
+- Secure session-based authentication using secure, HTTP-only, SameSite cookies.
+- CSRF protection appropriate to cookie-based sessions.
+- Rate limiting and lockout/backoff protections on login, password-reset, MFA-validation, and API-key-related endpoints.
+- The first successfully created account becomes the initial Owner.
+- After the first Owner exists, public registration is disabled.
+- Later accounts are created by authorized Admins or invited through a secure invitation flow.
+- Optional TOTP authenticator-app MFA, with a policy requiring MFA for Owner and Admin users once enabled.
+- Backup/recovery codes if MFA is implemented.
+- Design the auth-provider layer so OIDC/SSO can be added later without rewriting authorization.
+- Include documentation/placeholders for future Authentik, Keycloak, Microsoft Entra ID, GitHub OAuth, or generic OIDC integration.
+
+Required roles:
+1. Owner
+   - Full organization/system control.
+   - May manage ownership, organization settings, security policy, integrations, credentials, API keys, users, roles, audit retention, schedules, and emergency controls.
+   - Ownership transfer must be an explicit safeguarded operation.
+   - Protect against accidental deletion or loss of the last Owner.
+
+2. Admin
+   - May manage users, projects, workflows, integrations, API keys, and configuration.
+   - Cannot transfer ownership or perform owner-only destructive organization actions.
+
+3. Operator
+   - May create, run, cancel, retry, and approve authorized workflow stages.
+   - May inspect runs, logs, projects, and workflow configuration within scope.
+   - Cannot manage organization-wide users, sensitive credentials, or Owner-only settings.
+
+4. Developer / Contributor
+   - May submit work requests, inspect assigned/authorized projects and runs, and interact with assigned projects.
+   - Cannot change sensitive organization configuration.
+
+5. Viewer / Auditor
+   - Read-only access to authorized projects, runs, logs, audit records, and reports.
+   - No mutation access.
+
+6. Service Account / Agent Identity
+   - Non-human API identity.
+   - Uses scoped API keys or future workload identity.
+   - Has no password login.
+   - Has clearly limited scopes, expiration options, rotation, revocation, usage visibility, and audit attribution.
+
+Authorization:
+- Implement role-based access control plus project-scoped permissions where relevant.
+- Every backend endpoint must enforce authorization server-side.
+- The frontend may hide unavailable controls for usability, but backend authorization is authoritative.
+- Preserve immutable audit records for role changes, account changes, invitations, API-key events, policy changes, Mission changes, Validation Journey changes, holdout access, schedule changes, and access-sensitive actions.
+
+============================================================
+8. API AND API KEYS
+============================================================
+
+NachtLabs must expose an excellent agent-friendly API.
+
+API principles:
+- Version all routes, such as `/api/v1/...`.
+- Use consistent REST resources and predictable structured error responses.
+- Generate and expose an OpenAPI schema.
+- Provide interactive internal API documentation.
+- Include accurate endpoint descriptions, request/response models, examples, auth requirements, and error contracts.
+- Generate or prepare a typed TypeScript client from OpenAPI for the web application.
+- Use UTC ISO 8601 timestamps.
+- Use stable UUIDs or similarly robust identifiers.
+- Use cursor pagination for large activity/log lists where appropriate.
+- Support idempotency keys for mutations that may be retried by agents or webhooks.
+- Include request/correlation IDs in API responses and logs.
+- Apply rate limits appropriate to user/session/API-key identity and endpoint risk.
+- Return useful validation errors but never leak stack traces, secrets, tokens, or internal integration details.
+- Use a consistent API envelope or error schema, document it, and test it.
+
+Core API categories:
+- Authentication and current-user data.
+- Users, invitations, roles, and permissions.
+- Organizations and settings.
+- Projects and project policies.
+- Project Missions, constraints, and non-goals.
+- Validation Journeys and holdout validation.
+- Repositories and Git-host connections.
+- Agent/provider/model configurations.
+- Ollama connections and health status.
+- Work requests.
+- Workflow templates and stage policies.
+- Runs, stages, events, logs, artifacts, approvals, retries, verification findings, and cancellation.
+- Pull requests, commits, branches, and validation results.
+- Regression jobs and regression findings.
+- Monitoring dashboards, log search, alerts, incidents, recommendations, and remediation approvals.
+- API keys and service accounts.
+- Webhooks and webhook deliveries.
+- Audit logs.
+- Health and readiness endpoints.
+
+API keys:
+- Give each API key a visible name, owner/service-account relationship, scope set, project restrictions, optional expiration, last-used timestamp, source/IP metadata when available, and revocation.
+- Display raw API keys only once at creation.
+- Store only a secure hash/verifier, never plaintext.
+- Support key rotation with overlapping validity windows if feasible.
+- Clearly identify actions performed with API keys in audit records.
+- Allow Owner/Admins to create credentials agents can use to submit work, retrieve status, add approved events, and interact with permitted endpoints.
+- Do not allow arbitrary API keys unrestricted administrative access by default.
+
+Suggested service-account scopes:
+- `work_requests:create`
+- `work_requests:read`
+- `runs:read`
+- `runs:cancel`
+- `projects:read`
+- `projects:write`
+- `missions:read`
+- `validation_journeys:read`
+- `logs:read`
+- `webhooks:manage`
+- `integrations:read`
+- `agent_events:write`
+- `recommendations:read`
+
+Build an extensible scope model and enforce it server-side.
+
+============================================================
+9. PRIMARY NAVIGATION
+============================================================
+
+Create polished consistent primary navigation with these areas:
+
+1. Overview
+   - System health.
+   - Active runs.
+   - Queue depth.
+   - Recent failures.
+   - Agent/model status.
+   - Integration status.
+   - Recent activity.
+   - Actionable setup checklist when the system is not configured.
+
+2. Projects
+   - Connected repositories.
+   - Project status.
+   - Project settings.
+   - Project Mission and constraints.
+   - Validation Journeys and holdout configuration.
+   - Repository branch defaults.
+   - Workflow policies.
+   - Agent/model selection.
+   - Validation commands.
+   - Approval requirements.
+   - Webhook configuration.
+   - Environment/deployment placeholders.
+   - Project-scoped members and permissions.
+
+3. Work Requests
+   - Create and manage incoming requests.
+   - Sources: UI, API, GitHub webhook, Gitea webhook.
+   - Priority, title, detailed requirements, target project/branch, acceptance criteria, attachments, labels, related issue/PR references, requester identity, and status.
+
+4. Workflows
+   - Workflow templates.
+   - Stage configuration.
+   - Retry policy.
+   - Timeouts.
+   - Approval gates.
+   - Independent-verifier policy.
+   - Required Validation Journeys.
+   - Holdout policy.
+   - Regression policy.
+   - Allowed actions.
+   - Project assignments.
+   - Safe defaults and validation.
+
+5. Runs
+   - Active and historical workflow runs.
+   - Live progress.
+   - Stages.
+   - Logs.
+   - Tool calls.
+   - Agent/model metadata.
+   - Mission-compliance assessment.
+   - Validation Journey and holdout results.
+   - Independent-verification findings.
+   - Git evidence.
+   - Test results.
+   - PR/deployment status.
+   - Approval history.
+   - Retry history.
+   - Artifacts.
+   - Cancel/retry controls subject to policy.
+
+6. Agents & Models
+   - Hermes Agent configuration/status.
+   - OpenCode configuration/status.
+   - Ollama server connections.
+   - Model profiles.
+   - Endpoint health.
+   - Capabilities.
+   - Default routing.
+   - Separate implementation and verifier model profiles.
+   - Concurrency limits.
+   - Timeouts.
+   - Test-connection actions.
+   - Usage/cost/latency summaries where available.
+
+7. Integrations
+   - GitHub connections.
+   - Gitea connections.
+   - Webhook endpoints/secrets.
+   - Future integration framework.
+   - Delivery status and diagnostics.
+   - Connection health.
+
+8. Monitoring & Insights
+   - Monitoring dashboard.
+   - Logs explorer.
+   - Alerts.
+   - Incidents.
+   - Recommendations.
+   - Remediation approvals/history.
+   - Saved searches/views.
+   - System/service health.
+   - Regression results and trends.
+
+9. API & Keys
+   - API docs link.
+   - API-key management.
+   - Service accounts.
+   - Scope management.
+   - Usage history.
+   - Webhook management where appropriate.
+
+10. Audit Log
+   - Immutable security and operational audit events.
+   - Powerful filtering and export.
+   - Detail views.
+
+11. Settings
+   - Organization.
+   - Users/invitations.
+   - Roles.
+   - Authentication/MFA policy.
+   - Security settings.
+   - Retention settings.
+   - Notification settings.
+   - Themes/preferences.
+   - Global feature settings.
+   - Emergency controls.
+
+============================================================
+10. PROJECT GOVERNANCE: MISSION, JOURNEYS, AND HOLDOUTS
+============================================================
+
+Each project must have an explicit governance layer that guides and constrains the factory.
+
+A. Project Mission
+
+Build a Mission editor and versioned Mission model.
+
+A Mission must define:
+- Project purpose.
+- Intended users.
+- Core product outcomes.
+- Approved domains and responsibilities.
+- Explicit non-goals.
+- Technical and architectural constraints.
+- Security/privacy constraints.
+- Compliance or reliability requirements if applicable.
+- Ownership/escalation contact or role.
+- Definition of unacceptable changes.
+- Risk tolerance.
+- Required validation baseline.
+- Version, author, approval timestamp, and change history.
+
+Mission behavior:
+- Every work request must be checked against the Mission before entering implementation.
+- The plan must include a Mission-alignment assessment:
+  - aligned
+  - partially aligned
+  - unclear
+  - out of scope
+  - conflicts with constraints
+- Requests that are unclear, out of scope, or conflict with constraints must pause for human review rather than proceed automatically.
+- Every pull-request evidence package must state whether the final implementation remains Mission-aligned.
+- Mission changes require appropriate Owner/Admin authorization, version history, and immutable audit events.
+
+B. Validation Journeys
+
+Build a structured Validation Journey model with:
+- Name.
+- Description.
+- Project.
+- Category, such as critical path, regression, security, usability, API, or integration.
+- Preconditions.
+- Test data/setup requirement.
+- Steps.
+- Expected outcomes.
+- Evidence requirements.
+- Execution type:
+  - automated script
+  - API test
+  - browser E2E test
+  - integration test
+  - manual procedure
+  - external validation adapter
+- Required command or adapter configuration.
+- Required role for approval if manual.
+- Required-on workflow/change/release type.
+- Timeout.
+- Artifact configuration.
+- Enabled/disabled state.
+- Version history.
+- Last-run result.
+- Owner and review state.
+
+Validation Journey behavior:
+- Let projects designate a required baseline set of journeys.
+- Run required journeys at configured workflow stages.
+- Present clear pass/fail/skipped/blocked results.
+- Attach artifacts, logs, screenshots, recordings, traces, or report links to the run.
+- Do not consider an implementation fully verified if a required journey is missing, skipped without an authorized exception, or failed.
+- Provide a guided UI for creating a journey from a successful manual test or historical run.
+
+C. Holdout Validation
+
+Build protected holdout validation support.
+
+Holdout requirements:
+- A holdout is a validation scenario intentionally withheld from the implementing agent’s normal context.
+- Holdout content is accessible only to authorized roles and verifier/execution services that need it.
+- Do not place raw holdout instructions in generic run logs, implementation prompts, agent context windows, or pull-request summaries.
+- The implementation stage may know only that a holdout requirement exists, not protected details.
+- The verifier stage can run and evaluate holdouts through controlled tooling.
+- Store results and evidence securely.
+- Audit access and modification to holdout definitions.
+- Make holdout use optional and configurable because early projects may not have mature holdout suites.
+
+D. Independent Verification / Judge Stage
+
+Add an explicit independent verification stage after implementation and normal verification, before pull-request creation.
+
+Independent verifier requirements:
+- Review the approved plan, Mission alignment, acceptance criteria, changed files, diff summary, test results, Validation Journey results, holdout results if permitted, and known limitations.
+- Use a separate agent invocation, context, and preferably a different model profile or provider from the implementation agent.
+- Allow policy to require a distinct verifier model/profile.
+- Produce structured findings:
+  - pass
+  - pass with warnings
+  - needs rework
+  - failed
+  - human review required
+- Findings identify evidence, concern, severity, recommended action, and confidence.
+- If rework is allowed, route only bounded relevant findings back to implementation/repair.
+- Limit verifier-rework cycles.
+- Record verifier decisions and evidence.
+- A verifier pass is evidence, not a substitute for required human approvals.
+
+E. Regression Workflow
+
+Implement a reusable regression workflow:
+- Manual trigger in version one.
+- Optional scheduler framework, disabled by default.
+- Can target a project branch, selected commit, recent merged PR range, or release candidate.
+- Runs selected Validation Journeys, regression suites, and optional holdouts.
+- Records results as a separate regression run with full evidence.
+- Can create alerts, incidents, or draft work requests when failures are found.
+- Must not autonomously modify source code, merge, deploy, or open a PR without standard work-request and approval workflow.
+- Requires explicit Owner/Admin enablement before schedules become active.
+
+============================================================
+11. PROJECTS AND GIT INTEGRATIONS
+============================================================
+
+Version-one Git providers:
+- GitHub
+- Gitea
+
+Required features:
+- Connect GitHub and self-hosted Gitea servers/accounts securely.
+- Support custom self-hosted Gitea base URLs.
+- Add repository connections through secure provider-specific configuration.
+- Prefer secure OAuth/App/token patterns appropriate to each provider. If personal access tokens are used initially, label them clearly, narrowly scope them, encrypt them at rest, and provide rotation/revocation guidance.
+- Test provider connectivity before enabling a project.
+- List/select accessible repositories.
+- Store repository metadata, provider, base URL, owner/organization, repository name, default branch, connection identity, and selected project configuration.
+- Maintain project-level configuration for:
+  - default base branch
+  - workflow selection
+  - enabled agents
+  - implementation and verifier model profiles
+  - validation commands
+  - Validation Journey requirements
+  - holdout policy
+  - maximum retries
+  - time limits
+  - allowed commands/actions
+  - PR-only versus auto-merge versus deploy-after-merge behavior
+  - approval-gate settings
+  - webhook trigger labels/commands
+  - network permissions
+  - artifact/log retention
+  - regression policy and disabled-by-default optional schedule
+- Clone repositories into managed project/run-specific workspaces.
+- Never make untracked direct edits to a production checkout.
+- Use isolated workspace directories per run and branch.
+- Sanitize and validate repository paths and branch names.
+- Prevent concurrent operations from corrupting shared workspaces.
+- Create branches with a predictable safe naming policy, such as:
+  `nachtlabs/<project-slug>/<work-request-id>-<short-slug>`
+- Commit and push only through authorized workflow stages.
+- Respect project-specific target-repository commit conventions if configured.
+- If no target-repository convention exists, use concise generated messages in the form:
+  `<type>(<scope>): <description>`
+- Before an agent creates a target-repository commit:
+  - inspect staged changes
+  - ensure changes match the approved plan
+  - run applicable formatting/lint/test commands
+  - scan staged content for likely secrets
+  - record commit rationale and validation evidence
+- Associate commits, branches, pull requests, provider links, and push outcomes with the NachtLabs run.
+- Create PRs in GitHub and Gitea with:
+  - meaningful title
+  - concise summary
+  - Mission-alignment statement
+  - acceptance-criteria mapping
+  - Validation Journey and independent-verification evidence
+  - known risks/limitations
+  - links back to NachtLabs
+  - labels when configured
+- Capture provider errors, branch-protection errors, commit failures, push failures, and webhook-delivery outcomes as structured events.
+- Never force-push by default.
+- Never modify the default branch directly unless an explicit high-privilege policy allows it. Treat direct default-branch changes as separately approved exceptional actions.
+
+Build provider interfaces such as:
+- `GitProvider`
+- `RepositoryClient`
+- `PullRequestClient`
+- `WebhookVerifier`
+
+Implement GitHub and Gitea adapters behind these interfaces.
+
+Webhook requirements:
+- Use provider signature verification.
+- Store webhook secrets encrypted.
+- Enforce timestamp/replay protections when provider capabilities allow them.
+- Deduplicate delivery IDs.
+- Record sanitized delivery status and error diagnostics.
+- Avoid persisting full raw payloads unless required and protected by strict retention/redaction policy.
+
+============================================================
+12. AGENTS, MODELS, AND OLLAMA
+============================================================
+
+Build a provider-neutral integration architecture.
+
+Required initial integrations:
+
+1. Ollama
+- Support direct connection to one or more Ollama servers.
+- Configurable base URL.
+- Optional authentication/header configuration stored encrypted if needed.
+- Connection test.
+- Model discovery/listing.
+- Per-model profile configuration.
+- Health/status display.
+- Timeout and concurrency limits.
+- Track request duration, errors, model used, token/usage metadata if the server provides it.
+- Never expose Ollama credentials to the browser.
+
+2. Hermes Agent
+- Treat Hermes Agent as a first-class coding-agent integration.
+- Create a clear adapter interface with configuration, connection testing, capability discovery if available, invocation, event streaming/polling, cancellation, and normalized results.
+- Do not assume undocumented APIs. Use a configurable adapter boundary and document the expected integration contract.
+- Make configuration editable through Settings and Agents & Models.
+- Preserve inputs/outputs safely with secret redaction.
+
+3. OpenCode
+- Treat OpenCode as a first-class coding-agent integration.
+- Use a clean adapter model with configuration, connection testing, capability handling, execution, status/events, cancellation, and normalized results.
+- Do not tightly couple NachtLabs to a single transport or implementation detail.
+
+Core abstractions:
+- `AgentProvider`
+- `AgentExecution`
+- `ModelProvider`
+- `ModelProfile`
+- `ToolPolicy`
+- `ExecutionWorkspace`
+- `RunContext`
+- `AgentEvent`
+- `ToolCallRecord`
+- `VerifierPolicy`
+- `VerificationFinding`
+- `ValidationJourneyExecutor`
+
+Agent configuration:
+- Each project can choose allowed implementation-agent providers, verifier-agent providers, and default model profiles.
+- Owners/Admins can set global defaults.
+- Keep model selection, system instructions, context limits, timeout, concurrency, temperature or equivalent controls, tool permissions, network permission, and budget limits in explicit versioned policy objects.
+- Record selected implementation agent/model, verifier agent/model, configuration-profile versions, policy version, and adapter version for every run.
+- Never send secrets unnecessarily in prompts.
+- Avoid placing raw credentials, sensitive internal configuration, holdout details, or unrestricted filesystem data into model context.
+- Allow different model tiers for planning, implementation, verification, and summarization when configured.
+
+============================================================
+13. WORK REQUESTS AND INTAKE
+============================================================
+
+NachtLabs must normalize all incoming work into one durable work-request model.
+
+Supported intake sources:
+- Web UI.
+- Agent-facing API.
+- GitHub webhooks.
+- Gitea webhooks.
+
+Web UI work-request form:
+- Title.
+- Description.
+- Project.
+- Priority.
+- Target branch.
+- Acceptance criteria.
+- Attachments or links.
+- Labels.
+- Related GitHub/Gitea issue or PR.
+- Requested workflow.
+- Optional target date.
+- Submitter/requester.
+- Safe preview and validation.
+
+Webhook intake:
+- Support optional per-project GitHub/Gitea webhook triggers.
+- Require explicit project enablement.
+- Support allowlisted labels and comment commands, such as:
+  - `factory:run`
+  - `/factory plan`
+  - `/factory implement`
+- Verify webhook signatures and applicable replay protections.
+- Record raw inbound payloads only when necessary and only with strict redaction/retention controls.
+- Store normalized webhook-event metadata.
+- Prevent replay using delivery IDs/idempotency controls.
+- Let projects require human approval before webhook-triggered work begins.
+- Show delivery failures and diagnostics in Integrations and Monitoring.
+
+API intake:
+- Allow authorized service accounts/agents to create work requests through scoped API keys.
+- Use idempotency keys.
+- Return work-request and run identifiers.
+- Require scopes and project-level access.
+
+Normalized work-request model:
+- ID.
+- Organization/project.
+- Source.
+- Source reference and external URL.
+- Requester identity.
+- Title/description.
+- Priority.
+- Status.
+- Target branch.
+- Acceptance criteria.
+- Attachments/links.
+- Labels.
+- Requested workflow.
+- Approval requirements.
+- Mission-alignment state.
+- Timestamps.
+- Related run IDs.
+- Audit trail.
+
+============================================================
+14. DEFAULT AGENT WORKFLOW
+============================================================
+
+Implement a durable state machine for the standard software-work workflow. It must handle success, failure, cancellation, retry, pause-for-approval, idempotent resumption, policy denial, verifier rework, and human escalation.
+
+Default stages:
+
+1. Intake and Validation
+- Validate request details.
+- Validate project, repository, user/service-account permission, selected workflow, and required configuration.
+- Detect missing details and transition to a user-action-needed state when appropriate.
+
+2. Mission and Scope Assessment
+- Assess the request against the current project Mission, constraints, non-goals, and risk policy.
+- Record one of:
+  - aligned
+  - partially aligned
+  - unclear
+  - out of scope
+  - conflicts with constraints
+- Requests that are unclear, out of scope, or conflicting must pause for authorized human review.
+- Do not proceed past a denied scope assessment.
+
+3. Repository Discovery
+- Inspect repository structure, documentation, coding guidelines, dependencies, existing tests, relevant modules, and configured project knowledge.
+- Record evidence and a concise repository-context summary.
+
+4. Plan
+- Produce:
+  - implementation plan
+  - affected-file estimate
+  - risks
+  - dependencies
+  - test strategy
+  - acceptance-criteria mapping
+  - Mission-alignment explanation
+  - affected Validation Journeys
+  - likely required holdout checks without exposing protected details
+  - estimated complexity/effort
+  - proposed branch name
+- Store the plan as a durable artifact.
+- Do not claim certainty where evidence is weak.
+
+5. Plan Approval Gate
+- Enabled by default for every newly created project.
+- Authorized users may approve, reject, request changes, or modify permitted metadata.
+- Capture approver, timestamp, comment, policy version, Mission version, and plan-artifact reference.
+- Allow organizations/projects to change policy later.
+- Do not begin code modification if approval is required and absent.
+
+6. Implementation
+- Create an isolated workspace.
+- Create a feature branch.
+- Delegate bounded implementation tasks to the configured agent provider.
+- Record agent activity, model metadata, tool calls, commands, modified files, checkpoints, and policy decisions.
+- Enforce command, filesystem, network, timeout, and tool policies.
+
+7. Verification
+- Run configured formatting, linting, unit tests, integration tests, security/dependency checks, secret scans, project-specific commands, and required Validation Journeys.
+- Record exact commands, working directory, environment-safe metadata, start/end timestamps, exit code, truncated/sanitized output, artifacts, and results.
+- Do not store secret environment values in logs.
+- Required Validation Journey failures must block PR creation unless an authorized exception is recorded.
+
+8. Repair Loop
+- On validation failure, provide bounded evidence to the configured implementation agent and permit a limited number of policy-controlled repair attempts.
+- Record retry number, reason, changes, validation results, and outcome.
+- Stop and surface the issue when retry budgets, time limits, safety limits, or confidence thresholds are reached.
+- Never loop indefinitely.
+
+9. Independent Verification
+- Invoke a verifier/judge separate from implementation execution.
+- Review the approved plan, Mission alignment, acceptance criteria, changed files, diff summary, tests, Validation Journey results, permitted holdout results, and known limitations.
+- Generate structured pass/warning/rework/fail/human-review findings.
+- If policy permits bounded rework, return only relevant findings to the repair loop.
+- Limit verifier-rework cycles.
+- Record verifier identity/model/profile, evidence, confidence, and outcome.
+- A verifier pass is evidence, not a substitute for required human approvals.
+
+10. Review and Evidence
+- Generate a reviewer-friendly summary:
+  - requested outcome
+  - Mission alignment
+  - implementation summary
+  - files changed
+  - commit list
+  - test/check results
+  - Validation Journey results
+  - independent-verifier findings
+  - known limitations
+  - risks
+  - acceptance-criteria status
+  - recommended reviewer focus
+- Provide links to logs, diff, artifacts, and approval history.
+
+11. Pull Request
+- Push the feature branch.
+- Create a GitHub or Gitea pull request.
+- Include complete summary and evidence.
+- Record PR URL/ID/status.
+- Update run status accurately.
+
+12. Post-PR Action
+- Respect configurable per-project policy:
+  - PR only with human review and merge.
+  - Auto-merge only if policy and conditions explicitly allow.
+  - Deployment after merge only if policy and explicit approval allow.
+- Default all new projects to PR-only/human-review mode.
+- Merges, deployments, migrations, destructive actions, secret access, network actions beyond policy, and identity/access changes require human approval by default.
+
+Workflow controls:
+- Start, pause, cancel, retry, resume, and archive where appropriate.
+- Show clear state transitions.
+- Support explicit dry-run mode that produces intended actions without executing them.
+- Add an emergency stop:
+  - immediately blocks new agent work
+  - pauses queued jobs
+  - attempts safe cancellation of running jobs
+  - records an audit event
+  - requires Owner/Admin authorization
+  - provides a clearly logged re-enable process
+
+============================================================
+15. SAFETY, SANDBOXING, AND EXECUTION CONTROLS
+============================================================
+
+NachtLabs is an agent-control platform. Treat execution safety as a core product concern.
+
+Baseline permissions:
+- Agents may inspect configured repository content, analyze code, create plans, work in isolated run workspaces, and run explicitly configured safe validation commands.
+- Agents may create branches, commit changes, push authorized branches, and create GitHub/Gitea pull requests when project policy permits.
+- Merging, production deployment, destructive commands, database migrations, secrets access, external network actions, identity/access-control changes, and policy changes require human approval by default.
+
+Implement:
+- Per-project command allowlists.
+- Configurable command timeouts.
+- Process-tree termination on timeout/cancel.
+- Bounded captured output with a full-output artifact strategy when safely required.
+- Isolated per-run Linux workspace directories.
+- Dedicated execution-service account with restricted permissions.
+- Safe directory-cleanup policy.
+- Validated workspace paths.
+- Configurable network-policy abstraction.
+- Future-ready sandbox/execution-runner interface.
+- Linux-native local execution for version one, but do not portray it as a complete security sandbox.
+- Prominent documentation describing the trust boundary and recommending OS-level isolation, dedicated hosts/VMs, low-privilege service accounts, restricted filesystem access, and appropriate network controls for production.
+- Optional “manual intervention required” states for steps that cannot be safely automated.
+- Never execute arbitrary shell content supplied directly from untrusted work-request text.
+- Never interpolate untrusted user or agent content into shell commands without robust argument handling and allowlisting.
+
+Make all sensitive or dangerous transitions explicit in the audit log.
+
+============================================================
+16. OBSERVABILITY, RUN HISTORY, AND AUDIT
+============================================================
+
+Each agent run must provide deep, searchable, correlated observability.
+
+Required run data:
+- Run ID.
+- Work request.
+- Project/repository.
+- Workflow/version.
+- Current state/stage.
+- Progress.
+- Start/end/elapsed times.
+- Requester.
+- Authorized operator/approver identities.
+- Selected implementation agent/provider/model.
+- Selected verifier agent/provider/model.
+- Selected Ollama/model profile where applicable.
+- Mission version and Mission assessment.
+- Validation Journey requirements/results.
+- Holdout-execution status/results while preserving protected details.
+- Policy/configuration version.
+- Workspace/branch metadata.
+- Token count, cost estimate, and latency if available.
+- Retry count/history.
+- PR/commit/deployment information.
+- Outcome/error classification.
+
+Required evidence:
+- Structured stage timeline.
+- Live event stream.
+- Readable logs.
+- Tool-call records with sanitized inputs/outputs, result, duration, and failure information.
+- Git evidence: branch, commit IDs, changed files, diff summary, PR URL/status, push outcome.
+- Validation evidence: exact commands, exit codes, duration, result, artifacts, secret-scan result, Validation Journey result, and retry history.
+- Agent/model metadata.
+- Independent-verifier findings.
+- Approval events.
+- Cancellation events.
+- Artifacts.
+- Links between related entities.
+
+Audit log:
+- Immutable append-only model.
+- Audit events are separate from high-volume operational logs.
+- Record human and service-account events.
+- Include actor, action, target, timestamp, source IP/user agent when appropriate, organization/project, correlation/run ID, outcome, and safe metadata.
+- Record:
+  - logins and authentication failures
+  - MFA actions
+  - password-reset and invitation events
+  - role/permission changes
+  - API-key lifecycle events
+  - credential/integration creation, update, validation, and rotation
+  - project-policy changes
+  - Mission changes
+  - Validation Journey and holdout changes/access
+  - workflow approvals/rejections
+  - run-state changes
+  - branch pushes and PR creation
+  - regression-run execution/results
+  - schedule enable/disable events
+  - emergency stops
+  - remediation recommendation approvals/rejections/application
+  - exports and sensitive-log access where appropriate
+- Provide filters, pagination, detail view, and safe export.
+- Never write secrets, raw tokens, or protected holdout details to the audit log.
+
+============================================================
+17. MONITORING & INSIGHTS
+============================================================
+
+Build Monitoring & Insights as a first-class product area.
+
+Telemetry model:
+- Use structured JSON logs internally.
+- Include timestamp, severity, service/component, organization, project, repository, workflow, run ID, stage, agent/provider, model profile, actor identity where safe, correlation/request ID, trace ID when available, event category, and sanitized message/context.
+- Use an OpenTelemetry-compatible instrumentation architecture for logs, traces, and metrics, even if version one stores/serves much telemetry locally.
+- Correlate telemetry with workflow runs, tool calls, audit events, Git actions, validation results, regression runs, and integration events.
+
+Monitoring sections:
+
+A. Monitoring Dashboard
+Display:
+- API health.
+- Worker health.
+- Database health.
+- Queue depth.
+- Active/paused/stuck/failed run counts.
+- Failure rate.
+- API latency and error rate.
+- Agent/provider/model health.
+- Ollama endpoint status.
+- GitHub/Gitea integration status.
+- Webhook delivery health.
+- Retry exhaustion count.
+- Validation Journey trend.
+- Regression trend.
+- Recent critical events.
+- Alert status.
+- Trend charts with meaningful time ranges.
+
+B. Live Log Explorer
+Provide:
+- Real-time log streaming.
+- Search.
+- Time-range filtering.
+- Filters for severity, service, project, repository, workflow, run ID, stage, agent, provider/model, Git host, event category, and status.
+- Human-friendly timeline/log view.
+- Structured event/JSON inspector.
+- Compact terminal-style display.
+- Click-through correlation to related run, tool call, work request, PR, integration, alert, incident, regression result, or audit event.
+- Saved searches and shared views.
+- Sensible pagination/virtualization for large logs.
+- Safe export subject to permissions.
+
+C. Incidents and Error Grouping
+- Fingerprint and group recurring errors.
+- Show first seen, last seen, frequency, affected projects/runs, trend, severity, impact, and linked evidence.
+- Avoid flooding users with duplicate alerts.
+- Allow acknowledge, assign, mute/snooze, resolve, reopen, and annotate behavior subject to role.
+- Keep an incident timeline.
+
+D. Alerts
+Create alert rules for:
+- unavailable Ollama endpoints
+- repeated agent failures
+- worker failures
+- stuck runs
+- exhausted retry budgets
+- increasing failure rate
+- unusual run duration
+- high queue depth
+- webhook delivery failures
+- Git-provider authorization errors
+- Validation Journey failures
+- holdout failures
+- regression failures
+- login/authentication anomaly indicators
+- API-key abuse indicators
+- system-service health failures
+
+For version one:
+- Support in-app and email notifications.
+- Build a notifier interface for future Slack, Discord, Teams, PagerDuty, ntfy, and generic outbound webhooks.
+- Provide quiet periods and deduplication to prevent alert storms.
+- Log every alert lifecycle action.
+
+E. Insights / Reliability Advisor
+This feature analyzes sanitized operational logs, incidents, validation results, and run history to generate evidence-backed recommendations.
+
+For each recommendation, show:
+- Recommendation ID.
+- Title.
+- Severity/priority.
+- Confidence.
+- Affected service/project/workflow/integration.
+- Problem description.
+- Evidence:
+  - event/error fingerprint
+  - counts
+  - time range
+  - affected runs
+  - relevant sanitized log excerpts
+  - Validation Journey/regression trends where relevant
+- Probable cause, clearly labeled as inference when not proven.
+- Proposed remediation.
+- Risk and rollback notes.
+- Whether remediation is safe to automate.
+- Related incidents/runs.
+- Recommendation status:
+  - new
+  - acknowledged
+  - approved
+  - rejected
+  - deferred
+  - applied
+  - verified
+  - ineffective
+
+Examples of acceptable recommendations:
+- Recommend increasing a project test timeout when repeated evidence shows a valid suite consistently exceeds the configured limit.
+- Recommend configuring missing validation commands when runs repeatedly reach verification without commands.
+- Recommend a fallback model profile or endpoint when an Ollama endpoint has repeated connection failures.
+- Recommend correcting Git-provider configuration after repeated authorization failures.
+- Recommend adjusting retry policy after transient failures show a repeatable pattern.
+- Recommend improving workflow instructions or project knowledge based on recurrent agent failure patterns.
+- Recommend adding or strengthening a Validation Journey after a regression escapes existing validation.
+- Create a draft work request or issue containing evidence and a suggested human-reviewed fix.
+
+Strict remediation safety:
+- NachtLabs may automatically perform only explicitly enabled, tightly bounded, reversible actions.
+- Examples: pause a queue for a known-unavailable provider, mark an integration degraded, retry a transient webhook delivery within the configured retry budget, or quarantine a repeatedly failing workflow.
+- NachtLabs must never autonomously:
+  - change secrets
+  - change user roles/permissions
+  - change merge/deploy policy
+  - alter production infrastructure
+  - modify source code
+  - change agent/system prompts
+  - change model routing
+  - edit repository configuration
+  - apply database migrations
+  - make external network changes
+without an explicit authorized human-approval event.
+
+The Monitoring & Insights UI must clearly distinguish verified evidence from inferred root cause or recommendation.
+
+Retention and privacy:
+- Make retention configurable.
+- Support policy-based purge/archival design.
+- Restrict access by role/project permissions.
+- Redact secrets before persistence, display, export, or model-assisted analysis.
+- Sanitize untrusted log values to prevent log injection.
+- Document sensitive-data handling.
+
+Future log-backend readiness:
+- Design a pluggable telemetry/log-storage interface.
+- Do not require Grafana Loki in the first milestone.
+- If Loki support is added later, use stable low-cardinality labels such as service, environment, and project.
+- Do not use run IDs, request IDs, user IDs, IPs, or other high-cardinality values as Loki labels; retain them in structured log content instead.
+
+============================================================
+18. SETTINGS AND SECRET MANAGEMENT
+============================================================
+
+Create a polished Settings area that includes:
+
+Organization:
+- Organization name.
+- Branding placeholders.
+- Timezone/display preferences.
+- Default retention.
+- Feature flags where appropriate.
+
+Users and Access:
+- User list.
+- Invitation flow.
+- Role assignment.
+- Project access.
+- MFA status/policy.
+- Disable/reactivate users.
+- Protect against loss of last Owner.
+
+Integrations:
+- GitHub.
+- Gitea.
+- Ollama servers.
+- Hermes Agent.
+- OpenCode.
+- Webhooks.
+- Future provider placeholders.
+
+API and Service Accounts:
+- Create/revoke/rotate scoped API keys.
+- Show key metadata and usage.
+- Never show raw existing keys again.
+
+Workflow and Safety:
+- Default workflow.
+- Global run limits.
+- Worker concurrency policy.
+- Emergency stop.
+- Allowlisted tools/commands.
+- Default approval policy.
+- Independent verifier defaults.
+- Default Validation Journey policy.
+- Holdout policy.
+- Regression schedule framework, disabled by default.
+- Retry/time limits.
+- Network defaults.
+- Feature configuration.
+
+Notifications:
+- In-app.
+- Email.
+- Future notification providers through an abstraction.
+
+Retention:
+- Operational-log retention.
+- Audit-log retention.
+- Artifact retention.
+- Protected holdout-data retention.
+- Export policy.
+- Data-cleanup policy with safeguards.
+
+Secrets:
+- Implement an encrypted secret-store abstraction.
+- Encrypt sensitive integration credentials at rest using an application master key sourced from protected Linux environment/system configuration.
+- Include key-rotation design/documentation.
+- Mask secrets in UI and logs.
+- Keep secret access audited.
+- Do not place integration secrets in frontend state or API responses.
+- Use least privilege and narrow scopes for provider tokens.
+
+============================================================
+19. DATA MODEL
+============================================================
+
+Create a practical normalized data model. Exact naming is flexible, but include entities equivalent to:
+
+Identity and authorization:
+- Organization
+- User
+- UserSession
+- Invitation
+- Role
+- Permission / RoleMapping
+- ProjectMembership
+- MFAConfiguration
+- ServiceAccount
+- APIKey
+- APIKeyScope
+- PasswordResetToken
+
+Projects and governance:
+- Project
+- ProjectMission
+- ProjectMissionVersion
+- ValidationJourney
+- ValidationJourneyVersion
+- ValidationJourneyExecution
+- HoldoutValidation
+- HoldoutValidationExecution
+- VerifierPolicy
+- VerificationFinding
+- RegressionWorkflow
+- RegressionRun
+
+Projects and integrations:
+- RepositoryConnection
+- GitProviderConnection
+- AgentProviderConnection
+- ModelProviderConnection
+- OllamaEndpoint
+- ModelProfile
+- ProjectAgentPolicy
+- ProjectWorkflowPolicy
+- ProjectCommandPolicy
+- WebhookEndpoint
+- WebhookDelivery
+
+Workflow:
+- WorkRequest
+- WorkflowDefinition
+- WorkflowVersion
+- WorkflowRun
+- RunStage
+- RunEvent
+- RunApproval
+- RunRetry
+- ExecutionWorkspace
+- ToolCallRecord
+- CommandExecution
+- RunArtifact
+- GitCommitRecord
+- PullRequestRecord
+- DeploymentRecord placeholder
+- AgentExecutionRecord
+
+Observability:
+- OperationalLogEvent
+- Trace/telemetry correlation metadata as appropriate
+- MetricSnapshot or rollup entity where needed
+- AlertRule
+- AlertInstance
+- Incident
+- IncidentEvent
+- InsightRecommendation
+- RemediationApproval
+- RemediationExecution
+- SavedLogView
+
+Governance:
+- AuditEvent
+- SystemSetting
+- OrganizationSetting
+- DataRetentionPolicy
+- EmergencyStopState
+- ScheduleConfiguration
+
+Include:
+- UUID primary keys.
+- Created/updated timestamps.
+- Optimistic versioning or safe transactional state transitions for critical mutable entities.
+- Appropriate indexes for list pages and monitoring queries.
+- Foreign-key integrity.
+- Soft-delete/archive patterns where appropriate, but do not use soft-delete to hide security-critical records.
+- Explicit enum/state definitions for workflow, validation, verification, regression, schedule, and approval state machines.
+
+============================================================
+20. FRONTEND PAGES
+============================================================
+
+Build functional pages for at least these paths:
+
+Public/auth:
+- `/login`
+- `/forgot-password`
+- `/reset-password`
+- `/setup` for first-Owner setup only, disabled after initialization
+- `/accept-invitation`
+- `/mfa/setup`
+- `/mfa/verify`
+
+Authenticated:
+- `/overview`
+- `/projects`
+- `/projects/new`
+- `/projects/[projectId]`
+- `/projects/[projectId]/mission`
+- `/projects/[projectId]/validation-journeys`
+- `/projects/[projectId]/holdouts`
+- `/projects/[projectId]/settings`
+- `/work-requests`
+- `/work-requests/new`
+- `/work-requests/[workRequestId]`
+- `/workflows`
+- `/workflows/[workflowId]`
+- `/runs`
+- `/runs/[runId]`
+- `/regressions`
+- `/regressions/[regressionRunId]`
+- `/agents-models`
+- `/integrations`
+- `/integrations/github`
+- `/integrations/gitea`
+- `/integrations/ollama`
+- `/integrations/hermes`
+- `/integrations/opencode`
+- `/monitoring`
+- `/monitoring/logs`
+- `/monitoring/alerts`
+- `/monitoring/incidents`
+- `/monitoring/insights`
+- `/api-keys`
+- `/audit-log`
+- `/settings`
+- `/settings/users`
+- `/settings/security`
+- `/settings/notifications`
+- `/settings/retention`
+- `/settings/themes`
+- `/settings/emergency-controls`
+
+Design details:
+- Use deeply linked detail pages.
+- Preserve filters in URL query strings where useful.
+- Support useful browser back/forward behavior.
+- Provide empty and onboarding states.
+- Use optimistic updates carefully and reconcile with backend truth.
+- Use global error boundaries and route-specific errors.
+- Make critical actions confirmable and explain impact.
+- Require typed confirmation for destructive actions where appropriate.
+- Do not create excessive confirmation dialogs for routine reversible actions.
+
+============================================================
+21. END-TO-END ACCEPTANCE MILESTONE
+============================================================
+
+The first fully demonstrated milestone must prove a real secure vertical slice.
+
+It must work like this:
+
+1. An operator installs and runs NachtLabs on Linux as native services.
+2. No Docker, Docker Compose, Kubernetes, or container runtime is required.
+3. PostgreSQL, API, worker, and web services are installed and managed through documented Linux/systemd procedures.
+4. The developer creates the first account, which becomes Owner.
+5. The Owner can sign in securely.
+6. The Owner can select any of the six complete themes.
+7. The Owner creates a project Mission with scope, non-goals, constraints, and a required validation baseline.
+8. The Owner creates at least one Validation Journey for the project.
+9. The Owner configures a local or remote Ollama endpoint and successfully tests connectivity.
+10. The Owner configures at least one coding-agent adapter: Hermes Agent or OpenCode.
+11. The Owner connects GitHub or self-hosted Gitea.
+12. The Owner selects a repository and creates a NachtLabs project.
+13. The Owner configures a safe validation command for the project.
+14. The Owner creates one small bounded work request through the web UI.
+15. NachtLabs performs intake validation, Mission/scope assessment, and repository discovery.
+16. NachtLabs creates and displays a plan with affected files, risks, test plan, acceptance-criteria mapping, Mission alignment, and affected Validation Journeys.
+17. The Owner approves the plan.
+18. NachtLabs creates an isolated Linux workspace and feature branch.
+19. NachtLabs invokes the configured agent adapter to make a small safe change, such as a documentation or tightly scoped code change.
+20. NachtLabs runs configured checks, a secret scan, and at least one required Validation Journey.
+21. NachtLabs invokes an independently configured verifier stage and displays its structured result.
+22. NachtLabs records command evidence, logs, tool calls, model/agent data, artifacts, Git evidence, commit/push outcomes, Mission assessment, Validation Journey evidence, verifier findings, and state transitions.
+23. NachtLabs creates a target-repository commit, pushes the feature branch, and opens a real GitHub or Gitea pull request.
+24. NachtLabs displays PR link/status in run details.
+25. NachtLabs records immutable audit events for all material actions.
+26. Monitoring & Insights displays correlated run and system logs.
+27. A deliberately induced non-sensitive test failure or unavailable test endpoint produces a visible incident/alert.
+28. NachtLabs groups related errors and generates an evidence-backed remediation recommendation.
+29. The recommendation requires human approval before any configuration-changing action.
+30. The UI clearly distinguishes verified evidence from inferred root cause/recommendation.
+31. A manually triggered regression run can execute a configured Validation Journey and display results.
+32. NachtLabs services run under documented non-root systemd service accounts with defined filesystem restrictions and health checks.
+33. The NachtLabs repository itself remains uncommitted/unpushed unless the operator explicitly asks for those actions.
+
+Do not call this milestone complete until it works through actual UI, API, PostgreSQL database, worker, systemd service, and integration boundaries. If an external agent adapter cannot be fully exercised in the environment, implement a clearly labeled local development adapter that follows the exact production adapter contract and demonstrate the full orchestration pipeline against it. Do not hide this limitation; document it.
+
+============================================================
+22. TESTING, QUALITY, AND DOCUMENTATION
+============================================================
+
+Testing:
+- Backend unit tests for business rules, authorization, state transitions, API-key scope enforcement, secret masking, webhook verification, Git policy checks, Mission enforcement, Validation Journey policy, holdout access control, verifier decisions, regression policy, and workflow-policy checks.
+- Backend integration tests using PostgreSQL.
+- Frontend component tests for important forms, role-aware navigation, theme behavior, Mission editor, Validation Journey configuration, and critical workflow views.
+- End-to-end browser tests for:
+  - initial Owner setup
+  - login/logout
+  - permission restrictions
+  - project creation
+  - Mission creation and approval
+  - Validation Journey creation
+  - work-request submission
+  - plan approval
+  - run detail/live updates using a controlled development adapter
+  - independent verification flow
+  - API-key creation/revocation
+  - monitoring/incident/recommendation flow
+  - manual regression run
+- Test API contracts/OpenAPI behavior.
+- Test redaction so known fake secrets do not appear in logs, audit views, API responses, exports, model-analysis input, or UI.
+- Test systemd service health checks and basic service-configuration validation where feasible.
+
+Code quality:
+- Strict TypeScript.
+- Strong Python typing.
+- Linting.
+- Formatting.
+- Type checking.
+- Pre-commit hooks or documented quality commands.
+- Meaningful error messages.
+- Avoid unused code and dependencies.
+- Use clear naming and small composable modules.
+- Add test fixtures/factories rather than brittle hard-coded test data.
+
+Documentation:
+Create:
+- `README.md`
+  - overview
+  - prerequisites
+  - Linux setup
+  - environment configuration
+  - PostgreSQL setup
+  - migrations
+  - development commands
+  - testing
+  - systemd service installation
+  - common troubleshooting
+- `docs/architecture/overview.md`
+- `docs/architecture/workflow-engine.md`
+- `docs/architecture/integration-adapters.md`
+- `docs/architecture/mission-and-validation.md`
+- `docs/architecture/independent-verification.md`
+- `docs/architecture/regression-workflows.md`
+- `docs/architecture/git-workflow.md`
+- `docs/security/threat-model.md`
+- `docs/security/secrets-and-redaction.md`
+- `docs/security/holdout-protection.md`
+- `docs/security/systemd-hardening.md`
+- `docs/operations/linux-development.md`
+- `docs/operations/linux-systemd-deployment.md`
+- `docs/operations/backup-and-restore.md`
+- `docs/operations/incident-response.md`
+- `docs/api/agent-api.md`
+- `docs/api/webhooks.md`
+- `docs/contributing.md`
+- `docs/adr/` containing decisions for:
+  - chosen stack
+  - Linux-first/systemd-native deployment model
+  - authentication model
+  - workflow execution model
+  - Mission and Validation Journey model
+  - independent verifier model
+  - holdout-validation security model
+  - regression-workflow policy
+  - secret-encryption approach
+  - monitoring/telemetry design
+  - Git-provider adapter strategy
+  - agent-provider adapter strategy
+  - Docker deferred decision
+
+Documentation must clearly state:
+- Version one is not Docker-based.
+- Linux is the canonical design, development, test, and production platform.
+- Production deployment is systemd-based.
+- The local execution model has security limits and should be isolated appropriately in production.
+- Agent autonomy is policy-controlled and human governance is mandatory for high-risk actions.
+- Missions, Validation Journeys, independent verification, and holdout validation are central reliability controls.
+- Regression scheduling is disabled by default until explicitly enabled by an authorized operator.
+- The build agent must not commit or push the NachtLabs source repository unless the operator explicitly requests it.
+
+============================================================
+23. BUILD ORDER
+============================================================
+
+Implement in this order. Keep each milestone runnable, tested, and documented. Do not create Git commits or push the NachtLabs repository unless explicitly directed by the operator.
+
+Milestone 1: Repository foundation
+- Monorepo.
+- Next.js app.
+- FastAPI app.
+- PostgreSQL configuration.
+- Alembic.
+- Basic health endpoints.
+- Linux shell scripts and Makefile.
+- Base documentation.
+- Quality tooling.
+- `.gitignore`, `.env.example`, secret scanning, and safe developer setup.
+
+Milestone 2: Design system and authenticated shell
+- Premium responsive application shell.
+- Sidebar/top bar.
+- All six complete themes.
+- Login/setup flow.
+- First Owner initialization.
+- Session auth.
+- Basic RBAC.
+- Settings and user preferences.
+
+Milestone 3: Organizations, projects, governance, audit, API keys
+- Organization/user/role models.
+- Project CRUD.
+- Project Mission model and editor.
+- Validation Journey model and editor.
+- Holdout authorization/data model.
+- Immutable audit event system.
+- Service accounts/API keys/scopes.
+- OpenAPI docs and typed-client foundation.
+
+Milestone 4: Integrations
+- GitHub/Gitea adapter interfaces and secure configurations.
+- Ollama endpoints/models/health checks.
+- Hermes/OpenCode adapter contracts and settings screens.
+- Integration tests/statuses.
+- Encrypted secret handling/redaction.
+
+Milestone 5: Work requests and workflow state machine
+- UI/API/webhook intake.
+- Normalized work requests.
+- Mission/scope assessment.
+- Workflow definitions.
+- Durable run/stage state machine.
+- Plan artifact and approval gate.
+- Run list/detail UI.
+
+Milestone 6: Worker and controlled execution
+- PostgreSQL-backed jobs.
+- Isolated Linux workspaces.
+- Command policy.
+- Cancellation, timeouts, retry controls.
+- Development agent adapter if necessary.
+- Live event/log streaming.
+- Default bounded concurrency of one active implementation run.
+
+Milestone 7: Validation and independent verification
+- Validation Journey execution interfaces.
+- Required journey enforcement.
+- Protected holdout execution/authorization model.
+- Independent verifier stage.
+- Bounded verifier-rework loop.
+- Evidence presentation.
+
+Milestone 8: Git workflow
+- Clone workspace.
+- Branches.
+- Safe agent-created target-repository commits.
+- Secret scanning.
+- Push validation.
+- Validation/test execution.
+- GitHub/Gitea PR creation.
+- Evidence capture.
+- End-to-end acceptance flow.
+
+Milestone 9: Monitoring, Insights, and regression
+- Structured operational logs.
+- Dashboard.
+- Logs explorer.
+- Alerts/incidents.
+- Recommendation engine using safe deterministic rules first.
+- Human remediation approval.
+- Full correlation with runs/audits.
+- Manual regression workflow.
+- Optional scheduler framework disabled by default.
+
+Milestone 10: Linux hardening and release readiness
+- Hardened systemd templates.
+- Dedicated service accounts and filesystem layout.
+- Security review.
+- Permission tests.
+- Redaction tests.
+- Rate limits.
+- Error handling.
+- End-to-end tests.
+- Backup/restore verification.
+- Operations documentation.
+- Demo/seed data that never includes real credentials.
+
+Do not jump directly to advanced features while the foundation is incomplete.
+
+============================================================
+24. OUTPUT EXPECTATIONS
+============================================================
+
+Start by:
+1. Presenting the proposed repository tree.
+2. Listing exact Linux prerequisites and supported distribution assumptions.
+3. Listing environment variables in `.env.example` files using placeholders only.
+4. Explaining the first implementation milestone concisely.
+5. Explaining how Mission, Validation Journey, holdout, independent-verifier, and regression concepts will be represented in the architecture.
+6. Then begin implementing Milestone 1.
+
+At each milestone:
+- Summarize what was added.
+- List commands to run on Linux.
+- Identify environment values the operator must provide.
+- Run tests, linting, type checks, formatting checks, migration checks, and secret scans where feasible.
+- Do not create Git commits or push the NachtLabs repository unless explicitly requested by the operator.
+- Report validation results and any remaining uncommitted files.
+- Do not claim a feature is working unless relevant code, migration, API/UI route, automated coverage, and operational documentation exist.
+- Preserve a clean functioning baseline before moving forward.
+
+Build NachtLabs deliberately. Prioritize a secure, maintainable, Linux-native, polished foundation over superficial breadth.

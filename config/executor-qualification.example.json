@@ -1,0 +1,6 @@
+{
+  "qualified": false,
+  "release": "0.1.0",
+  "catalog_sha256": "REPLACE_AFTER_OPERATOR_ACCEPTANCE",
+  "evidence_reference": "Record real Linux isolation, cancellation, budget and provider compatibility observations before enabling."
+}

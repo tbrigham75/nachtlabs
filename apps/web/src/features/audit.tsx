@@ -1,0 +1,11 @@
+"use client";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { api, type Audit } from "@nachtlabs/api-client";
+import { Badge, Empty, ErrorNotice, Heading, Loading } from "@/components/ui";
+export function AuditScreen() {
+ const params=useSearchParams();const router=useRouter();const action=params.get('action')??'';const cursor=params.get('cursor');
+ const query=useQuery({queryKey:['audit',action,cursor],queryFn:()=>api<{items:Audit[];next_cursor:string|null}>(`/audit-log?${new URLSearchParams({action,...(cursor?{cursor}:{})})}`)});
+ function navigate(next:Record<string,string>) {router.push(`/audit-log?${new URLSearchParams(next)}`);}
+ return <><Heading title="Audit log" note="Append-only records of identity, governance, and access-sensitive actions."><a className="button" href="/api/v1/audit-log/export">Export authorized records</a></Heading><div className="panel"><label htmlFor="audit-action">Action filter</label><input key={action} id="audit-action" placeholder="Exact action, e.g. project.created" defaultValue={action} onKeyDown={e=>{if(e.key==='Enter')navigate({action:e.currentTarget.value});}}/><small>Press Enter to apply. Filters and pagination are preserved in the URL. Export includes up to 1,000 authorized records.</small></div><ErrorNotice error={query.error}/>{query.isPending?<Loading/>:query.data?.items.length?<section className="panel table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Actor / target</th><th>Outcome</th><th>Evidence</th></tr></thead><tbody>{query.data.items.map(event=><tr key={event.id}><td>{new Date(event.created_at).toLocaleString()}</td><td><strong>{event.action}</strong></td><td><code>{event.actor}</code><small>{event.target}</small></td><td><Badge good={event.outcome==='success'}>{event.outcome}</Badge></td><td><details><summary>Inspect</summary><pre>{JSON.stringify(event,null,2)}</pre></details></td></tr>)}</tbody></table></section>:<Empty title="No matching audit records"><p>Events appear here as authorized activity is recorded.</p></Empty>}<div className="actions">{cursor&&<button onClick={()=>navigate({action})}>Newest records</button>}{query.data?.next_cursor&&<button onClick={()=>navigate({action,cursor:query.data!.next_cursor!})}>Older records →</button>}</div></>;
+}

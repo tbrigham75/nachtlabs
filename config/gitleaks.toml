@@ -1,0 +1,5 @@
+[extend]
+useDefault = true
+[allowlist]
+description = "Build dependencies and generated runtime output"
+paths = ['''node_modules/''', '''\.venv/''', '''\.next/''']

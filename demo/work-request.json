@@ -1,0 +1,12 @@
+{
+  "project_id": "REPLACE_WITH_PROJECT_UUID",
+  "title": "Add a greeting document",
+  "description": "Create docs/greeting.md containing exactly Hello from NachtLabs. followed by a newline.",
+  "acceptance_criteria": [
+    "docs/greeting.md contains exactly Hello from NachtLabs. followed by a newline.",
+    "No other file is changed."
+  ],
+  "target_ref": "main",
+  "priority": "normal",
+  "dry_run": false
+}

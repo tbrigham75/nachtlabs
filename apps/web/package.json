@@ -1,0 +1,17 @@
+{
+  "name": "@nachtlabs/web", "private": true, "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1", "build": "next build", "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit", "lint": "eslint .", "test": "vitest run"
+  },
+  "dependencies": {
+    "@nachtlabs/api-client": "workspace:*", "next": "^16.0.0", "react": "^19.2.0", "react-dom": "^19.2.0",
+    "@tanstack/react-query": "^5.66.0", "react-hook-form": "^7.54.2", "@hookform/resolvers": "^3.10.0",
+    "zod": "^3.24.2", "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3", "@types/node": "^24.0.0", "@types/react": "^19.0.0", "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0", "@tailwindcss/postcss": "^4.0.0", "eslint": "^9.20.0", "eslint-config-next": "^16.0.0",
+    "vitest": "^3.0.5", "jsdom": "^26.0.0", "@testing-library/react": "^16.2.0", "@testing-library/jest-dom": "^6.6.3"
+  }
+}

@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from nachtlabs.database import session
-from nachtlabs.models import GovernanceVersion, User
+from nachtlabs.models import GovernanceVersion, Organization, User
 from nachtlabs.security import new_token
 from nachtlabs.settings import get_settings
 from nachtlabs_api.main import create_app
@@ -188,3 +188,31 @@ def test_setup_token_is_enforced_when_required(
     finally:
         monkeypatch.undo()
         get_settings.cache_clear()
+
+
+def test_setup_closes_permanently_and_defaults_descriptive_fields(
+    client: TestClient,
+) -> None:
+    """A first run must need only an email and a password, and only once."""
+    created = client.post(
+        "/api/v1/auth/setup",
+        json={"email": "owner@example.com", "password": new_token()},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["role"] == "owner"
+    # Descriptive fields are optional and default server-side.
+    with session() as db:
+        org = db.scalar(select(Organization).where(Organization.name == "NachtLabs"))
+        assert org is not None
+    # A second account can never be created this way, whatever the payload.
+    for body in (
+        {"email": "second@example.com", "password": new_token()},
+        {"email": "third@example.com", "password": new_token(), "organization": "Other"},
+    ):
+        assert client.post("/api/v1/auth/setup", json=body).status_code == 409
+    # An unknown field is still rejected: the confirmation must never be sent.
+    rejected = client.post(
+        "/api/v1/auth/setup",
+        json={"email": "fourth@example.com", "password": new_token(), "password_confirm": "x"},
+    )
+    assert rejected.status_code == 422

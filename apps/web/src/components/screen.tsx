@@ -59,7 +59,10 @@ function destination(input: {
   if (mfaRequired && !["/mfa/setup", "/settings/security"].includes(path))
     return "/mfa/setup";
   if (initialized === false && !signedInPath(path)) return "/setup";
-  if (initialized === true && path === "/setup") return "/login";
+  // Deliberately no "/setup" -> "/login" redirect. Bouncing a visitor off the
+  // setup page looked like a broken refresh and hid the reason they could not
+  // register. /setup now always explains itself, and creating an account is
+  // still refused server-side with 409 setup_closed.
   if (!publicPage && signedOut) return "/login";
   return null;
 }

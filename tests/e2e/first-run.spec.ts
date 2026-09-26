@@ -78,13 +78,21 @@ test.describe("first-run discovery", () => {
     }
   });
 
-  test("setup is not offered once an account exists", async ({ page }) => {
+  test("setup explains itself instead of bouncing once an account exists", async ({
+    page,
+  }) => {
+    // Regression: /setup used to redirect straight back to /login, which read
+    // as a broken refresh and hid the reason registration was refused.
     await mock(page, true);
     await page.goto("/setup");
-    await expect(page).toHaveURL(/\/login$/);
-    await expect(
-      page.getByRole("heading", { name: "Welcome back" }),
-    ).toBeVisible();
+    await expect(page).toHaveURL(/\/setup$/);
+    await expect(page.getByText("An account already exists")).toBeVisible();
+    // The recovery routes are named, not left for the operator to guess.
+    const notice = page.locator(".notice").first();
+    await expect(notice).toContainText("make recover-owner");
+    await expect(notice).toContainText("--bootstrap");
+    await expect(notice).toContainText("without SMTP");
+    // And no form is offered that could only ever fail.
     await expect(
       page.getByRole("button", { name: "Create Owner account" }),
     ).toHaveCount(0);
@@ -200,15 +208,19 @@ test.describe("setup is always discoverable", () => {
     ).toHaveCount(1);
   });
 
-  test("the sign-in page still offers setup once initialized", async ({
+  test("first-time setup disappears from sign-in once an account exists", async ({
     page,
   }) => {
     await mock(page, true);
     await page.goto("/login");
-    // Setup is closed server-side, so following the link returns here. The
-    // affordance stays so a first-time operator can always find it.
-    await page.getByRole("link", { name: "First-time setup" }).click();
-    await expect(page).toHaveURL(/\/login$/);
+    // It has done its job, so the link retires itself.
+    await expect(
+      page.getByRole("link", { name: "First-time setup" }),
+    ).toHaveCount(0);
+    // Recovery guidance stays, because the credential may still be unknown.
+    await expect(page.locator(".auth-help")).toContainText(
+      "make recover-owner",
+    );
   });
 
   test("lost-access guidance is shown, including the SMTP caveat", async ({
@@ -239,5 +251,107 @@ test.describe("setup is always discoverable", () => {
     await page.waitForTimeout(600);
     const after = seen.filter((p) => p === "/login" || p === "/setup");
     expect(after).toEqual(["/setup"]);
+  });
+});
+
+test.describe("first-time setup form", () => {
+  // Serve a real setup response so a successful submit behaves like production.
+  async function mockSetup(page: import("@playwright/test").Page) {
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/stream"))
+        return route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: ": heartbeat\n\n",
+        });
+      if (path.endsWith("/auth/me"))
+        return route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "unauthenticated" } }),
+        });
+      if (path.endsWith("/auth/setup-status"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ initialized: false }),
+        });
+      if (path.endsWith("/auth/setup"))
+        return route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "00000000-0000-4000-8000-000000000002",
+            email: "owner@acme.example",
+            name: "Owner",
+            role: "owner",
+            active: true,
+            theme: "midnight",
+            mfa_enabled: false,
+            version: 1,
+          }),
+        });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({}),
+      });
+    });
+  }
+
+  test("asks for an email and the password twice", async ({ page }) => {
+    await mockSetup(page);
+    await page.goto("/setup");
+    await expect(page.getByLabel(/Email address/)).toBeVisible();
+    await expect(page.getByLabel(/^Password/)).toBeVisible();
+    await expect(page.getByLabel(/^Confirm password/)).toBeVisible();
+    // The two descriptive fields are prefilled so a first run needs only the
+    // email and the two password entries.
+    await expect(page.getByLabel(/Organization name/)).toHaveValue("NachtLabs");
+    await expect(page.getByLabel(/Your name/)).toHaveValue("Owner");
+  });
+
+  test("a mismatched confirmation is refused and never reaches the API", async ({
+    page,
+  }) => {
+    await mockSetup(page);
+    let posted: unknown = null;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/auth/setup"))
+        posted = request.postData();
+    });
+    await page.goto("/setup");
+    await page.getByLabel(/Email address/).fill("owner@acme.example");
+    await page.getByLabel(/^Password/).fill("correct-horse-battery");
+    await page.getByLabel(/^Confirm password/).fill("correct-horse-batery");
+    await page.getByRole("button", { name: "Create Owner account" }).click();
+    await expect(page.getByText("do not match")).toBeVisible();
+    expect(posted).toBeNull();
+    await expect(page).toHaveURL(/\/setup$/);
+  });
+
+  test("a matching confirmation creates the account and signs in", async ({
+    page,
+  }) => {
+    await mockSetup(page);
+    let posted: Record<string, unknown> | null = null;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/auth/setup"))
+        posted = JSON.parse(request.postData() ?? "{}");
+    });
+    await page.goto("/setup");
+    await page.getByLabel(/Email address/).fill("owner@acme.example");
+    await page.getByLabel(/^Password/).fill("correct-horse-battery");
+    await page.getByLabel(/^Confirm password/).fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Create Owner account" }).click();
+    await page.waitForURL("**/overview", { timeout: 15000 }).catch(() => {});
+    // The API forbids unknown fields, so the confirmation must be stripped.
+    expect(posted).not.toBeNull();
+    expect(posted).not.toHaveProperty("password_confirm");
+    expect(posted).toMatchObject({
+      email: "owner@acme.example",
+      password: "correct-horse-battery",
+    });
   });
 });

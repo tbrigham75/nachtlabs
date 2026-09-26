@@ -30,10 +30,14 @@ scripts, systemd, config: native operations. demo: disposable credential-free ex
 
 ## First run
 Open the configured origin in a browser. The interface checks whether an account exists and, if
-none does, offers Owner setup instead of a sign-in form. Enter an organization name, name, email
-and a password of at least 12 characters; that account becomes the Owner, and setup then closes
-permanently, so a second account cannot be created this way. Later accounts are added by the Owner
-under Settings or Invitations.
+none does, takes you straight to Owner setup instead of offering a sign-in form. You type an email
+address and a password twice; Organization and Name arrive prefilled and stay editable. That
+account becomes the Owner, you are signed in immediately, and first-time setup is then gone from the
+sign-in page for good. Later accounts are added by the Owner as invitations under Settings.
+
+If you ever reach `/setup` on an installation that is already initialized, the page says so and
+lists the ways forward: sign in, request a password reset, or recover as the operator on the host
+console. It never silently redirects you away and leaves you guessing.
 
 `POST /auth/setup` is intentionally reachable without a secret while uninitialized, so a fresh
 installation is usable immediately. On a host reachable from an untrusted network, set

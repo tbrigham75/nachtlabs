@@ -72,15 +72,17 @@ export function AuthScreen({
       ? "Welcome to NachtLabs"
       : challenge
         ? "Verify your identity"
-        : setup
-          ? "Initialize NachtLabs"
-          : forgot
-            ? "Reset your password"
-            : invitation
-              ? "Accept your invitation"
-              : login
-                ? "Welcome back"
-                : "Choose a new password";
+        : setupClosed
+          ? "Setup is already complete"
+          : setup
+            ? "Initialize NachtLabs"
+            : forgot
+              ? "Reset your password"
+              : invitation
+                ? "Accept your invitation"
+                : login
+                  ? "Welcome back"
+                  : "Choose a new password";
   const fields: Field[] = challenge
     ? [
         {
@@ -112,6 +114,15 @@ export function AuthScreen({
             min: 12,
             max: 128,
             help: "This account becomes the Owner. At least 12 characters.",
+          },
+          {
+            name: "password_confirm",
+            label: "Confirm password",
+            type: "password",
+            required: true,
+            min: 12,
+            max: 128,
+            help: "Type the same password again.",
           },
         ]
       : login || forgot
@@ -195,10 +206,10 @@ export function AuthScreen({
             <p>
               {firstRun
                 ? "No account exists on this installation yet. Create the first one; it becomes the Owner and setup then closes."
-                : setup
-                  ? "The first account becomes the Owner. Public setup closes after initialization."
-                  : setupClosed
-                    ? "This installation is already initialized. Sign in, or use a password reset link."
+                : setupClosed
+                  ? "Nothing can be created here. Use one of the routes below."
+                  : setup
+                    ? "The first account becomes the Owner. Public setup closes after initialization."
                     : "Your organization’s engineering control plane."}
             </p>
             {firstRun && !setup ? (
@@ -214,10 +225,35 @@ export function AuthScreen({
               </div>
             ) : setupClosed ? (
               <div className="notice" role="status">
-                <p>Setup has already been completed on this installation.</p>
-                <Link className="button primary" href="/login">
-                  Sign in
-                </Link>
+                <p>
+                  <strong>
+                    An account already exists on this installation.
+                  </strong>{" "}
+                  First-time setup is closed and will not create a second
+                  account, so the page you are on cannot register you.
+                </p>
+                <ul>
+                  <li>
+                    You know the credentials: <Link href="/login">sign in</Link>
+                    .
+                  </li>
+                  <li>
+                    You know the email but not the password:{" "}
+                    <Link href="/forgot-password">request a reset</Link>. This
+                    needs email delivery to be configured.
+                  </li>
+                  <li>
+                    You are the operator and have neither: on the host console
+                    run <code>make recover-owner</code> to reset the Owner
+                    password. It needs root. If no account exists at all, add{" "}
+                    <code>--bootstrap</code> to create the first one.
+                  </li>
+                  <li>
+                    Adding somebody else: the Owner issues an invitation under
+                    Settings. Invitations are sent by email, so an installation
+                    without SMTP cannot onboard anyone.
+                  </li>
+                </ul>
               </div>
             ) : message ? (
               <div className="notice success" role="status">
@@ -231,6 +267,13 @@ export function AuthScreen({
               <Form
                 key={`${path}-${Boolean(challenge)}-${Boolean(token)}`}
                 fields={fields}
+                // A first run should need only an email and a password, so the
+                // two descriptive fields arrive prefilled but stay editable.
+                initial={
+                  setup
+                    ? { organization: "NachtLabs", name: "Owner" }
+                    : undefined
+                }
                 label={
                   challenge
                     ? "Verify"
@@ -251,7 +294,19 @@ export function AuthScreen({
                     setChallenge(undefined);
                     await signedIn();
                   } else if (setup) {
-                    await write("/auth/setup", values);
+                    if (values.password !== values.password_confirm) {
+                      throw new Error(
+                        "The two passwords do not match. Retype them and try again.",
+                      );
+                    }
+                    // The API forbids unknown fields, so the confirmation must
+                    // never leave the browser. Name the payload explicitly.
+                    await write("/auth/setup", {
+                      organization: values.organization,
+                      name: values.name,
+                      email: values.email,
+                      password: values.password,
+                    });
                     await signedIn();
                   } else if (login) {
                     const result = await write<{
@@ -283,14 +338,16 @@ export function AuthScreen({
         )}
         <div className="auth-links">
           {/*
-              Always offered on the sign-in page, whatever setup-status says
-              or failed to say. Discoverability of first-run setup must not
-              depend on the API being reachable or on a client-side redirect
-              having fired. If setup is already complete the server refuses
-              and we land back here.
+              Fails open. The link is hidden only when setup-status positively
+              reports that an account already exists; when the answer is false
+              or unknown it stays visible, because hiding it on an unknown
+              answer is what removed the only route to registering. A visible
+              link that explains itself is safer than an invisible one.
             */}
           {login ? (
-            <Link href="/setup">First-time setup</Link>
+            initialized === true ? null : (
+              <Link href="/setup">First-time setup</Link>
+            )
           ) : firstRun || setupClosed ? null : (
             <>
               <Link href="/login">Sign in</Link>

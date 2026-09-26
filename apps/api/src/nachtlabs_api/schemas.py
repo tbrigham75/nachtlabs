@@ -19,8 +19,9 @@ class Login(Input):
 
 class Setup(Login):
     password: SecretStr = Field(min_length=12, max_length=128)
-    name: str = Field(min_length=1, max_length=120)
-    organization: str = Field(min_length=1, max_length=120)
+    name: str = Field(default="Owner", min_length=1, max_length=120)
+    # Defaults so a first run needs only an email and a password.
+    organization: str = Field(default="NachtLabs", min_length=1, max_length=120)
     # Only consulted when NACHTLABS_SETUP_TOKEN_REQUIRED is enabled.
     bootstrap_token: SecretStr | None = None
 

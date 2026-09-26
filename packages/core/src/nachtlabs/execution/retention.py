@@ -1,4 +1,5 @@
 """Remove only aged, unreferenced candidate snapshots while broker owns its host lock."""
+
 import re
 import shutil
 import time
@@ -14,10 +15,13 @@ def retention_tick() -> None:
     if not STORE.exists():
         return
     with session() as db:
-        protected = set(db.scalars(select(Evidence.candidate)))
+        protected = {str(v) for v in db.scalars(select(Evidence.candidate))}
         for run in db.scalars(select(Run)):
-            protected.add(run.candidate)
-            protected.add(run.snapshot.get("discovery", {}).get("base_candidate"))
+            if run.candidate is not None:
+                protected.add(run.candidate)
+            base = run.snapshot.get("discovery", {}).get("base_candidate")
+            if isinstance(base, str):
+                protected.add(base)
         days = max(list(db.scalars(select(RetentionPolicy.artifact_days))) or [90])
     cutoff = time.time() - days * 86400
     for path in STORE.iterdir():

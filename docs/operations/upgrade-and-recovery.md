@@ -1,10 +1,21 @@
 # Upgrade, interruption and recovery
 Status: authored procedure; NOT RUN.
 
+## Host-console scripts and configuration
+An installed deployment keeps its configuration in `/etc/nachtlabs`, not in the repository, and a
+bare `sudo python3 scripts/thing.py` inherits no environment. Every host-console script that reaches
+the database therefore loads `/etc/nachtlabs/migration.env` itself, and the shell targets fall back
+to it when there is no repository `.env`. Nothing is overridden: a variable already present in the
+environment always wins, and `NACHTLABS_OPERATOR_ENV_FILE` selects a different file.
+
+If a script reports that no configuration was found, the installation has never been configured:
+
+    sudo python3 scripts/configure.py --origin https://your-host
+
 ## Lost Owner access
 First find out what exists. This is read-only and changes nothing:
 
-    sudo make recover-owner
+    cd /opt/nachtlabs
     sudo python3 scripts/recover-owner.py --list
 
 It prints the organization and every account with role and active state. This exists because

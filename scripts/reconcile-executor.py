@@ -8,9 +8,15 @@ from uuid import UUID
 from nachtlabs.database import session
 from nachtlabs.execution import sandbox
 from nachtlabs.factory_models import ExecutorJob, Run
+
+# An installed deployment keeps its configuration in /etc/nachtlabs, and a bare
+# `sudo python3 scripts/reconcile-executor.py` inherits nothing.
+from nachtlabs.operator_env import require_operator_env
 from nachtlabs.security import encrypt
 from nachtlabs.workflows.state import event
 from sqlalchemy import select
+
+require_operator_env()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("job_id", type=UUID)

@@ -7,8 +7,22 @@ if [[ "$(uname -s)" != Linux ]]; then
   exit 1
 fi
 load_env() {
-  local env_path="${NACHTLABS_ENV_FILE:-$NACHTLABS_ROOT/.env}"
-  if [[ ! -f "$env_path" ]]; then echo "Missing trusted configuration file: $env_path" >&2; exit 1; fi
+  local env_path="${NACHTLABS_ENV_FILE:-}"
+  # An installed deployment keeps its configuration in /etc/nachtlabs; there is
+  # no .env in the repository, so fall back to the migrator env file rather than
+  # failing with "Missing trusted configuration file" on a healthy install.
+  if [[ -z "$env_path" ]]; then
+    if [[ -f "$NACHTLABS_ROOT/.env" ]]; then
+      env_path="$NACHTLABS_ROOT/.env"
+    elif [[ -r /etc/nachtlabs/migration.env ]]; then
+      env_path=/etc/nachtlabs/migration.env
+    fi
+  fi
+  if [[ -z "$env_path" || ! -f "$env_path" ]]; then
+    echo "Missing trusted configuration file: ${env_path:-<none found>}" >&2
+    echo "Set NACHTLABS_ENV_FILE, or run configure.py on a new installation." >&2
+    exit 1
+  fi
   # Only source an operator-owned configuration file, never repository/request input.
   set -a
   source "$env_path"

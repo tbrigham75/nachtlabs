@@ -14,6 +14,7 @@ from uuid import uuid4
 from nachtlabs.audit import AuditContext, record
 from nachtlabs.database import session
 from nachtlabs.models import LoginChallenge, Organization, User, UserSession
+from nachtlabs.operator_env import require_operator_env
 from nachtlabs.security import hasher
 from sqlalchemy import delete, select, text
 
@@ -62,6 +63,9 @@ def list_owners() -> int:
 
 
 def main() -> int:
+    # An installed deployment keeps its configuration in /etc/nachtlabs, and a
+    # bare `sudo python3 scripts/recover-owner.py` inherits nothing.
+    require_operator_env()
     parser = argparse.ArgumentParser()
     parser.add_argument("--email")
     parser.add_argument("--reason")

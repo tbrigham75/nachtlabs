@@ -28,6 +28,41 @@ const publicPaths = [
 function signedInPath(path: string) {
   return path === "/setup" || path === "/mfa/verify";
 }
+/**
+ * Resolve exactly one redirect destination.
+ *
+ * Returning a single target is the point: two router.replace calls in one
+ * effect let /login and /setup race, and on a slow API that race could land a
+ * first-time operator on a sign-in form they cannot use. Priority is ordered
+ * so the most specific, most safety-relevant answer wins, and an unknown setup
+ * status never produces a redirect at all.
+ */
+function destination(input: {
+  path: string;
+  publicPage: boolean;
+  signedOut: boolean;
+  initialized: boolean | undefined;
+  setupUnreachable: boolean;
+  mfaRequired: boolean;
+}): string | null {
+  const {
+    path,
+    publicPage,
+    signedOut,
+    initialized,
+    setupUnreachable,
+    mfaRequired,
+  } = input;
+  // An unreadable setup status must not be treated as "no account exists", and
+  // must not push a signed-in operator out of the application either.
+  if (setupUnreachable) return null;
+  if (mfaRequired && !["/mfa/setup", "/settings/security"].includes(path))
+    return "/mfa/setup";
+  if (initialized === false && !signedInPath(path)) return "/setup";
+  if (initialized === true && path === "/setup") return "/login";
+  if (!publicPage && signedOut) return "/login";
+  return null;
+}
 export function Screen() {
   const path = usePathname();
   const router = useRouter();
@@ -54,18 +89,19 @@ export function Screen() {
   });
   const initialized = setup.data?.initialized;
   const setupUnreachable = setup.isError;
-  const signedOut =
-    me.isError && me.error instanceof ApiError && me.error.status === 401;
+  const signedOut = me.error instanceof ApiError && me.error.status === 401;
+  const mfaRequired = me.data?.mfa_required === true;
+  const target = destination({
+    path,
+    publicPage,
+    signedOut,
+    initialized,
+    setupUnreachable,
+    mfaRequired,
+  });
   useEffect(() => {
-    if (!publicPage && signedOut) router.replace("/login");
-    if (initialized === false && !signedInPath(path)) router.replace("/setup");
-    if (initialized === true && path === "/setup") router.replace("/login");
-    if (
-      me.data?.mfa_required &&
-      !["/mfa/setup", "/settings/security"].includes(path)
-    )
-      router.replace("/mfa/setup");
-  }, [me.error, me.data, initialized, path, publicPage, router, signedOut]);
+    if (target) router.replace(target);
+  }, [router, target]);
   if (publicPage)
     return (
       <AuthScreen

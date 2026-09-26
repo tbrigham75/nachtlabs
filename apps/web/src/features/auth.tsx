@@ -279,19 +279,59 @@ export function AuthScreen({
                 }}
               />
             )}
-            <div className="auth-links">
-              {firstRun || setupClosed ? null : (
-                <Link href="/login">Sign in</Link>
-              )}
-              {firstRun || setupClosed || login ? null : (
-                <Link href="/forgot-password">Forgot password?</Link>
-              )}
-            </div>
-            <small style={{ marginTop: 24 }}>
-              Credentials remain on this installation. No public registration.
-            </small>
           </>
         )}
+        <div className="auth-links">
+          {/*
+              Always offered on the sign-in page, whatever setup-status says
+              or failed to say. Discoverability of first-run setup must not
+              depend on the API being reachable or on a client-side redirect
+              having fired. If setup is already complete the server refuses
+              and we land back here.
+            */}
+          {login ? (
+            <Link href="/setup">First-time setup</Link>
+          ) : firstRun || setupClosed ? null : (
+            <>
+              <Link href="/login">Sign in</Link>
+              {login ? null : (
+                <Link href="/forgot-password">Forgot password?</Link>
+              )}
+            </>
+          )}
+        </div>
+        {/*
+            The server cannot tell "no account" from "account whose password
+            you have lost", so recovery is always documented rather than
+            inferred. Additional accounts are invitations, not setup.
+          */}
+        {login ? (
+          <div className="auth-help">
+            <p>
+              <strong>No account yet, or locked out?</strong>
+            </p>
+            <ul>
+              <li>
+                No account on this installation yet: use the First-time setup
+                link. The first account becomes the Owner and setup then closes.
+              </li>
+              <li>
+                Already initialized but you cannot sign in: on the host console
+                run <code>make recover-owner</code> to reset the Owner password,
+                or <code>recover-owner.py --bootstrap</code> if no account
+                exists at all. Both require root.
+              </li>
+              <li>
+                Adding colleagues later: the Owner issues invitations under
+                Settings. Invitations are delivered by email, so an installation
+                without SMTP cannot onboard anyone.
+              </li>
+            </ul>
+          </div>
+        ) : null}
+        <small style={{ marginTop: 24 }}>
+          Credentials remain on this installation. No public registration.
+        </small>
       </main>
     </div>
   );

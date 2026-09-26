@@ -174,3 +174,70 @@ test.describe("first-run discovery", () => {
     ).toBeVisible();
   });
 });
+
+test.describe("setup is always discoverable", () => {
+  test("the sign-in page offers setup even when setup-status cannot be read", async ({
+    page,
+  }) => {
+    // The register form must not depend on the API answering, nor on a
+    // redirect having fired. This is the whole point of the fix.
+    await page.route("**/api/v1/**", (route) =>
+      route.fulfill({ status: 503, contentType: "text/plain", body: "down" }),
+    );
+    await page.goto("/login");
+    await expect(
+      page.getByRole("link", { name: "First-time setup" }),
+    ).toHaveCount(1);
+  });
+
+  test("the sign-in page offers setup when the API is healthy and uninitialized", async ({
+    page,
+  }) => {
+    await mock(page, false);
+    await page.goto("/login");
+    await expect(
+      page.getByRole("link", { name: "First-time setup" }),
+    ).toHaveCount(1);
+  });
+
+  test("the sign-in page still offers setup once initialized", async ({
+    page,
+  }) => {
+    await mock(page, true);
+    await page.goto("/login");
+    // Setup is closed server-side, so following the link returns here. The
+    // affordance stays so a first-time operator can always find it.
+    await page.getByRole("link", { name: "First-time setup" }).click();
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("lost-access guidance is shown, including the SMTP caveat", async ({
+    page,
+  }) => {
+    await mock(page, true);
+    await page.goto("/login");
+    const help = page.locator(".auth-help");
+    await expect(help).toBeVisible();
+    await expect(help).toContainText("make recover-owner");
+    await expect(help).toContainText("--bootstrap");
+    // Onboarding after setup closes depends on email, so it must be stated.
+    await expect(help).toContainText("without SMTP");
+  });
+
+  test("a single navigation from / reaches setup without passing through login", async ({
+    page,
+  }) => {
+    // Regression: / used to server-redirect to the private /overview, 401, and
+    // then race router.replace('/login') against router.replace('/setup').
+    const seen: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) seen.push(new URL(frame.url()).pathname);
+    });
+    await mock(page, false);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/setup$/);
+    await page.waitForTimeout(600);
+    const after = seen.filter((p) => p === "/login" || p === "/setup");
+    expect(after).toEqual(["/setup"]);
+  });
+});

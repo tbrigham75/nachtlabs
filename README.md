@@ -41,12 +41,21 @@ installation is usable immediately. On a host reachable from an untrusted networ
 then also require that one-time token. Until the Owner exists, keep the reverse proxy closed to
 untrusted clients.
 
+After the first account, setup is closed for good and further accounts are created by the Owner as
+**invitations** under Settings. Invariants are delivered by email, so an installation without SMTP
+cannot onboard anyone, and password reset is unavailable for the same reason.
+
 If the Owner password is lost and email is not configured, recover it on the host console with
 `make recover-owner`. If no account exists at all, the same command with `--bootstrap` creates the
 first one.
 
+## Updating an installation
+`install-systemd.sh` does not build, so a pulled commit is not compiled. Use `make diagnose-setup`
+to check whether the served bundle is current, then `make update` to pull, rebuild, restart and
+health-check. Both are described in [upgrade and recovery](docs/operations/upgrade-and-recovery.md).
+
 ## Operator commands
-make setup, make configure, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
+make setup, make configure, make update, make diagnose-setup, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
 
 Follow handoff ordering. Generate actual lockfiles and OpenAPI/TypeScript declarations on Linux; none were fabricated. The source-only review is recorded in docs/planning/source-review-m10.md.
 

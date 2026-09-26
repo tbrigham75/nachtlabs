@@ -666,6 +666,32 @@ tbody tr:hover {
   margin-top: 24px;
   font-size: 12px;
 }
+.auth-help {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.auth-help p {
+  margin: 0 0 8px;
+  color: var(--foreground);
+}
+.auth-help ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.auth-help li + li {
+  margin-top: 6px;
+}
+.auth-help code {
+  font:
+    11px ui-monospace,
+    monospace;
+  color: var(--foreground);
+}
 .auth-stamp {
   font:
     11px ui-monospace,

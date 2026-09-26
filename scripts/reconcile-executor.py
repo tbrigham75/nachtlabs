@@ -1,14 +1,16 @@
 """Local-only recovery of an uncertain job after operator inspection."""
+
 import argparse
 import json
 import os
 from uuid import UUID
-from sqlalchemy import select
+
 from nachtlabs.database import session
 from nachtlabs.execution import sandbox
 from nachtlabs.factory_models import ExecutorJob, Run
 from nachtlabs.security import encrypt
 from nachtlabs.workflows.state import event
+from sqlalchemy import select
 
 parser = argparse.ArgumentParser()
 parser.add_argument("job_id", type=UUID)
@@ -16,8 +18,11 @@ parser.add_argument("--reason", required=True)
 parser.add_argument("--confirm-executor-stopped", action="store_true")
 args = parser.parse_args()
 if os.geteuid() != 0 or not args.confirm_executor_stopped or len(args.reason) < 10:
-    raise SystemExit("Stop executor and inspect cgroups, filesystem, and delivery intent; then provide an explanation")
-import fcntl
+    raise SystemExit(
+        "Stop executor and inspect cgroups, filesystem, and delivery intent; then provide an explanation"
+    )
+import fcntl  # noqa: E402  (after the root/argument gate, before the broker lock is taken)
+
 lock = (sandbox.ROOT / "broker.lock").open("a")
 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 sandbox.recover()
@@ -31,7 +36,9 @@ with session() as db:
         path = sandbox.ROOT / "delivery" / (str(run.id) + "-" + str(job.attempt) + ".json")
         journal = json.loads(path.read_text()) if path.exists() else {}
         if journal.get("state") != "complete" or journal.get("candidate") != run.candidate:
-            raise SystemExit("Delivery is unresolved. Inspect the remote using an authorized environment; preserve this job until reviewed recovery is possible.")
+            raise SystemExit(
+                "Delivery is unresolved. Inspect the remote using an authorized environment; preserve this job until reviewed recovery is possible."
+            )
         job.result = encrypt(journal["result"], f"executor:{job.id}")
         job.state = "succeeded"
         run.state = "executor_wait"

@@ -9,4 +9,3 @@ class DomainError(Exception):
 def require(condition: bool, status: int, code: str, message: str) -> None:
     if not condition:
         raise DomainError(status, code, message)
-

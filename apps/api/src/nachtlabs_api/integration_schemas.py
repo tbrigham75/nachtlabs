@@ -2,10 +2,11 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Literal
 from uuid import UUID
-from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from nachtlabs.integrations.contracts import ProviderError
 from nachtlabs.integrations.transport import Endpoint
+from pydantic import BaseModel, Field, SecretStr, model_validator
+
 from nachtlabs_api.schemas import Input
 
 Provider = Literal["github", "gitea", "ollama"]
@@ -26,12 +27,19 @@ class ConnectionInput(Input):
     def endpoint(self) -> "ConnectionInput":
         self.base_url = self.base_url.rstrip("/")
         try:
-            Endpoint(self.base_url, tuple(self.pinned_addresses), self.allow_private,
-                     self.allow_http, self.timeout_seconds).validate()
+            Endpoint(
+                self.base_url,
+                tuple(self.pinned_addresses),
+                self.allow_private,
+                self.allow_http,
+                self.timeout_seconds,
+            ).validate()
         except ProviderError:
             raise ValueError("Provide an approved origin and a permitted pinned IP") from None
         if self.provider == "github" and self.base_url != "https://api.github.com":
-            raise ValueError("Initial GitHub adapter supports api.github.com; use Gitea for self-hosted Git")
+            raise ValueError(
+                "Initial GitHub adapter supports api.github.com; use Gitea for self-hosted Git"
+            )
         return self
 
 

@@ -1,2 +1,1 @@
 """NachtLabs HTTP boundary."""
-

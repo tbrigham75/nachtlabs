@@ -1,4 +1,5 @@
 """Operator-run generation; never executed during Windows authoring."""
+
 import json
 from pathlib import Path
 

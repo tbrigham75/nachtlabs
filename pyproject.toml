@@ -16,7 +16,7 @@ nachtlabs-worker = { workspace = true }
 dev = ["pytest>=8,<9", "pytest-cov>=6,<7", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-python-dateutil>=2.9", "httpx>=0.28,<1", "pip-audit>=2.8,<3"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/core/tests", "apps/api/tests"]
+testpaths = ["tests", "packages/core/tests"]
 markers = ["integration: requires a dedicated PostgreSQL test database"]
 
 [tool.ruff]

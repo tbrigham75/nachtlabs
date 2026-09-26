@@ -1,9 +1,9 @@
 """Authored contract tests. Execution is deferred to the Linux operator."""
+
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from nachtlabs.errors import DomainError
 from nachtlabs.execution.files import candidate, manifest, scope_gate
 from nachtlabs.integrations.contracts import ProviderError
@@ -11,13 +11,18 @@ from nachtlabs.integrations.delivery import PullRequests
 from nachtlabs.workflows.policy import ProjectExecutionPolicy, safe_ref, safe_relative
 
 
-@pytest.mark.parametrize("path", ["../outside", "/etc/passwd", ".", "./", "docs/../secret", "docs/line\nbreak", "C:\\secret"])
+@pytest.mark.parametrize(
+    "path",
+    ["../outside", "/etc/passwd", ".", "./", "docs/../secret", "docs/line\nbreak", "C:\\secret"],
+)
 def test_candidate_path_rejects_escapes(path: str) -> None:
     with pytest.raises(ValueError):
         safe_relative(path)
 
 
-@pytest.mark.parametrize("ref", ["--upload-pack=evil", "main..other", "main.lock", "main/../private", "main\nother"])
+@pytest.mark.parametrize(
+    "ref", ["--upload-pack=evil", "main..other", "main.lock", "main/../private", "main\nother"]
+)
 def test_ref_rejects_option_and_revision_injection(ref: str) -> None:
     with pytest.raises(ValueError):
         safe_ref(ref)
@@ -66,15 +71,37 @@ class Transport:
 
 def test_existing_pr_is_reconciled_without_mutation() -> None:
     branch, commit, marker = "nachtlabs/" + str(uuid4()), "a" * 40, "<!-- fixture -->"
-    transport = Transport([{"head": {"ref": branch, "sha": commit}, "base": {"ref": "main"},
-                            "body": marker, "state": "open", "number": 7, "html_url": "https://example.invalid/pr/7"}])
-    value = PullRequests(transport, "gitea", "fixture/repo").reconcile(branch, "main", marker, "Title", marker, commit)
+    transport = Transport(
+        [
+            {
+                "head": {"ref": branch, "sha": commit},
+                "base": {"ref": "main"},
+                "body": marker,
+                "state": "open",
+                "number": 7,
+                "html_url": "https://example.invalid/pr/7",
+            }
+        ]
+    )
+    value = PullRequests(transport, "gitea", "fixture/repo").reconcile(
+        branch, "main", marker, "Title", marker, commit
+    )
     assert value["number"] == 7 and transport.writes == 0
 
 
 def test_matching_branch_without_ownership_marker_blocks() -> None:
-    transport = Transport([{"head": {"ref": "nachtlabs/fixture", "sha": "a" * 40},
-                            "base": {"ref": "main"}, "body": "Unrelated", "state": "open"}])
+    transport = Transport(
+        [
+            {
+                "head": {"ref": "nachtlabs/fixture", "sha": "a" * 40},
+                "base": {"ref": "main"},
+                "body": "Unrelated",
+                "state": "open",
+            }
+        ]
+    )
     with pytest.raises(ProviderError):
-        PullRequests(transport, "github", "fixture/repo").reconcile("nachtlabs/fixture", "main", "ownership", "Title", "body", "a" * 40)
+        PullRequests(transport, "github", "fixture/repo").reconcile(
+            "nachtlabs/fixture", "main", "ownership", "Title", "body", "a" * 40
+        )
     assert transport.writes == 0

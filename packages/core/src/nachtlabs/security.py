@@ -42,7 +42,11 @@ def decode_key(encoded: str) -> bytes:
 
 def encryption_keys() -> dict[str, bytes]:
     settings = get_settings()
-    previous = json.loads(settings.previous_master_keys_file.read_text()) if settings.previous_master_keys_file else {}
+    previous = (
+        json.loads(settings.previous_master_keys_file.read_text())
+        if settings.previous_master_keys_file
+        else {}
+    )
     keys = {key_id: decode_key(value) for key_id, value in previous.items()}
     keys[settings.master_key_id] = decode_key(settings.master_key_file.read_text())
     return keys
@@ -56,7 +60,9 @@ def encrypt_with_key(value: dict[str, Any], context: str, key_id: str, key: byte
 
 def encrypt(value: dict[str, Any], context: str) -> str:
     settings = get_settings()
-    return encrypt_with_key(value, context, settings.master_key_id, encryption_keys()[settings.master_key_id])
+    return encrypt_with_key(
+        value, context, settings.master_key_id, encryption_keys()[settings.master_key_id]
+    )
 
 
 def decrypt(value: str, context: str) -> dict[str, Any]:
@@ -75,9 +81,12 @@ def redact(value: Any) -> Any:
     """Defense in depth; callers must use explicit safe metadata, never request bodies."""
     if isinstance(value, dict):
         return {
-            str(k): "[redacted]" if any(
-                word in str(k).lower() for word in ("password", "secret", "token", "cookie", "authorization", "holdout")
-            ) else redact(v)
+            str(k): "[redacted]"
+            if any(
+                word in str(k).lower()
+                for word in ("password", "secret", "token", "cookie", "authorization", "holdout")
+            )
+            else redact(v)
             for k, v in value.items()
         }
     if isinstance(value, list):
@@ -85,4 +94,3 @@ def redact(value: Any) -> Any:
     if isinstance(value, str):
         return value.replace("\n", " ").replace("\r", " ")[:1000]
     return value
-

@@ -14,13 +14,28 @@ class AuditContext:
     source: str
 
 
-def record(db: Session, context: AuditContext, action: str, target: str, *,
-           actor: str = "anonymous", org_id: UUID | None = None,
-           project_id: UUID | None = None, outcome: str = "success",
-           details: dict[str, Any] | None = None) -> None:
-    db.add(AuditEvent(
-        org_id=org_id, project_id=project_id, actor_id=actor, action=action,
-        target=target, outcome=outcome, request_id=context.request_id,
-        source=context.source[:64], details=redact(details or {}),
-    ))
-
+def record(
+    db: Session,
+    context: AuditContext,
+    action: str,
+    target: str,
+    *,
+    actor: str = "anonymous",
+    org_id: UUID | None = None,
+    project_id: UUID | None = None,
+    outcome: str = "success",
+    details: dict[str, Any] | None = None,
+) -> None:
+    db.add(
+        AuditEvent(
+            org_id=org_id,
+            project_id=project_id,
+            actor_id=actor,
+            action=action,
+            target=target,
+            outcome=outcome,
+            request_id=context.request_id,
+            source=context.source[:64],
+            details=redact(details or {}),
+        )
+    )

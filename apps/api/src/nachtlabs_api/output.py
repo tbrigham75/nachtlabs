@@ -1,4 +1,5 @@
 """Explicit public projections; persistence entities never serialize themselves."""
+
 from datetime import datetime
 from uuid import UUID
 

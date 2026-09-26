@@ -1,10 +1,23 @@
 """Foundation, governance and integrations; factory mappings are registered below."""
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -45,7 +58,9 @@ class User(Record, Base):
     mfa_last_step: Mapped[int] = mapped_column(Integer, default=0)
     recovery_hashes: Mapped[list[str]] = mapped_column(JSONB, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    __table_args__ = (CheckConstraint("role IN ('owner','admin','operator','contributor','viewer')"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('owner','admin','operator','contributor','viewer')"),
+    )
 
 
 class UserSession(Record, Base):
@@ -112,8 +127,15 @@ class GovernanceDocument(Record, Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     __table_args__ = (
         CheckConstraint("kind IN ('mission','journey','holdout')"),
-        CheckConstraint("approved_version IS NULL OR (approved_version > 0 AND approved_version <= version)"),
-        Index("one_mission_per_project", "project_id", unique=True, postgresql_where=text("kind = 'mission'")),
+        CheckConstraint(
+            "approved_version IS NULL OR (approved_version > 0 AND approved_version <= version)"
+        ),
+        Index(
+            "one_mission_per_project",
+            "project_id",
+            unique=True,
+            postgresql_where=text("kind = 'mission'"),
+        ),
     )
 
 
@@ -213,13 +235,17 @@ class IntegrationConnection(Record, Base):
     credential_version: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    __table_args__ = (CheckConstraint("provider IN ('github','gitea','ollama')"),
-                      CheckConstraint("timeout_seconds BETWEEN 1 AND 30"),)
+    __table_args__ = (
+        CheckConstraint("provider IN ('github','gitea','ollama')"),
+        CheckConstraint("timeout_seconds BETWEEN 1 AND 30"),
+    )
 
 
 class IntegrationProbe(Record, Base):
     __tablename__ = "integration_probes"
-    connection_id: Mapped[UUID] = mapped_column(ForeignKey("integration_connections.id"), index=True)
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("integration_connections.id"), index=True
+    )
     connection_version: Mapped[int] = mapped_column(Integer)
     requested_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     page: Mapped[int] = mapped_column(Integer, default=1)
@@ -233,8 +259,12 @@ class IntegrationProbe(Record, Base):
     __table_args__ = (
         CheckConstraint("state IN ('pending','running','succeeded','failed','stale')"),
         CheckConstraint("page BETWEEN 1 AND 100"),
-        Index("one_active_probe", "connection_id", unique=True,
-              postgresql_where=text("state IN ('pending','running')")),
+        Index(
+            "one_active_probe",
+            "connection_id",
+            unique=True,
+            postgresql_where=text("state IN ('pending','running')"),
+        ),
     )
 
 
@@ -248,8 +278,10 @@ class ModelProfile(Record, Base):
     role: Mapped[str] = mapped_column(String(20))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    __table_args__ = (CheckConstraint("role IN ('implementation','verifier','planning')"),
-                      CheckConstraint("temperature BETWEEN 0 AND 2"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('implementation','verifier','planning')"),
+        CheckConstraint("temperature BETWEEN 0 AND 2"),
+    )
 
 
 class AgentConfiguration(Record, Base):
@@ -263,8 +295,10 @@ class AgentConfiguration(Record, Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    __table_args__ = (CheckConstraint("provider IN ('hermes','opencode')"),
-                      CheckConstraint("timeout_seconds BETWEEN 10 AND 3600"),)
+    __table_args__ = (
+        CheckConstraint("provider IN ('hermes','opencode')"),
+        CheckConstraint("timeout_seconds BETWEEN 10 AND 3600"),
+    )
 
 
 class ProjectIntegration(Base):
@@ -275,10 +309,13 @@ class ProjectIntegration(Base):
     full_name: Mapped[str] = mapped_column(String(256))
     default_branch: Mapped[str] = mapped_column(String(256))
     probe_id: Mapped[UUID] = mapped_column(ForeignKey("integration_probes.id"))
-    implementation_agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("agent_configurations.id"))
+    implementation_agent_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("agent_configurations.id")
+    )
     verifier_agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("agent_configurations.id"))
     require_distinct_models: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
+
 
 # Register modular factory mappings for migration metadata.
 from nachtlabs import factory_models as factory_models  # noqa: E402,F401

@@ -1,11 +1,12 @@
 """Pinned-destination HTTP. Never resolves a hostname after credentials are selected."""
+
 import http.client
 import ipaddress
 import json
 import socket
 import ssl
-import time
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,16 @@ from nachtlabs.integrations.contracts import ProviderError
 
 MAX_RESPONSE = 2 * 1024 * 1024
 # Explicitly reject known cloud credential/metadata addresses even in private mode.
-METADATA = {ipaddress.ip_address(v) for v in ("169.254.169.254", "169.254.170.2", "100.100.100.200", "168.63.129.16", "fd00:ec2::254")}
+METADATA = {
+    ipaddress.ip_address(v)
+    for v in (
+        "169.254.169.254",
+        "169.254.170.2",
+        "100.100.100.200",
+        "168.63.129.16",
+        "fd00:ec2::254",
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -30,11 +40,19 @@ class Endpoint:
         try:
             parsed = urlsplit(self.url)
             port = parsed.port
-            if (parsed.scheme not in {"https", "http"} or not parsed.hostname or
-                parsed.username or parsed.password or parsed.query or parsed.fragment or
-                parsed.path not in {"", "/"} or port == 0 or
-                any(ord(c) < 33 or ord(c) > 126 for c in self.url) or
-                "\\" in self.url or "%" in self.url):
+            if (
+                parsed.scheme not in {"https", "http"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+                or port == 0
+                or any(ord(c) < 33 or ord(c) > 126 for c in self.url)
+                or "\\" in self.url
+                or "%" in self.url
+            ):
                 raise ValueError
             if parsed.scheme == "http" and not self.allow_http:
                 raise ValueError
@@ -49,7 +67,13 @@ class Endpoint:
                 ip = ipaddress.ip_address(address)
                 if "%" in address or (ip.version == 6 and ip.ipv4_mapped):
                     raise ValueError
-                if ip in METADATA or ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+                if (
+                    ip in METADATA
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_unspecified
+                    or ip.is_reserved
+                ):
                     raise ValueError
                 if not ip.is_global and not self.allow_private:
                     raise ValueError
@@ -69,8 +93,11 @@ class PinnedConnection(http.client.HTTPConnection):
         self.address = address
         self.transport_socket: socket.socket | None = None
         self.expired = threading.Event()
-        super().__init__(parsed.hostname or "", parsed.port or (443 if self.tls else 80),
-                         timeout=endpoint.timeout_seconds)
+        super().__init__(
+            parsed.hostname or "",
+            parsed.port or (443 if self.tls else 80),
+            timeout=endpoint.timeout_seconds,
+        )
 
     def connect(self) -> None:
         # Only numeric pinned IPs reach socket creation; Host and TLS SNI retain the hostname.
@@ -79,7 +106,13 @@ class PinnedConnection(http.client.HTTPConnection):
         try:
             if self.expired.is_set():
                 raise TimeoutError
-            self.sock = ssl.create_default_context(cafile=str(self.ca_file) if self.ca_file else None).wrap_socket(raw, server_hostname=self.host) if self.tls else raw
+            self.sock = (
+                ssl.create_default_context(
+                    cafile=str(self.ca_file) if self.ca_file else None
+                ).wrap_socket(raw, server_hostname=self.host)
+                if self.tls
+                else raw
+            )
             self.transport_socket = self.sock
             if self.expired.is_set():
                 self.abort()
@@ -87,7 +120,6 @@ class PinnedConnection(http.client.HTTPConnection):
         except BaseException:
             raw.close()
             raise
-
 
     def abort(self) -> None:
         self.expired.set()
@@ -103,13 +135,23 @@ class PinnedConnection(http.client.HTTPConnection):
 class PinnedJSON:
     def __init__(self, endpoint: Endpoint, headers: dict[str, str], ca_file: Path | None = None):
         endpoint.validate()
-        if any(k.lower() not in {"authorization", "accept", "x-github-api-version"} or
-               "\r" in v or "\n" in v for k, v in headers.items()):
+        if any(
+            k.lower() not in {"authorization", "accept", "x-github-api-version"}
+            or "\r" in v
+            or "\n" in v
+            for k, v in headers.items()
+        ):
             raise ProviderError("credential_format")
         self.endpoint, self.headers, self.ca_file = endpoint, headers, ca_file
 
     def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-        if method not in {"GET", "POST"} or not path.startswith("/") or path.startswith("//") or "\r" in path or "\n" in path:
+        if (
+            method not in {"GET", "POST"}
+            or not path.startswith("/")
+            or path.startswith("//")
+            or "\r" in path
+            or "\n" in path
+        ):
             raise ProviderError("request_policy")
         payload = json.dumps(body).encode() if body is not None else None
         if payload and len(payload) > 131072:
@@ -122,10 +164,18 @@ class PinnedJSON:
         timer.start()
         response: http.client.HTTPResponse | None = None
         try:
-            connection.request(method, path, body=payload, headers={
-                **self.headers, "Accept-Encoding": "identity", "Content-Type": "application/json",
-                "User-Agent": "NachtLabs/0.2", "Connection": "close",
-            })
+            connection.request(
+                method,
+                path,
+                body=payload,
+                headers={
+                    **self.headers,
+                    "Accept-Encoding": "identity",
+                    "Content-Type": "application/json",
+                    "User-Agent": "NachtLabs/0.2",
+                    "Connection": "close",
+                },
+            )
             response = connection.getresponse()
             if 300 <= response.status < 400:
                 raise ProviderError("redirect_blocked")
@@ -161,14 +211,18 @@ class PinnedJSON:
             return json.loads(b"".join(chunks))
         except ProviderError:
             raise
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             raise ProviderError("provider_timeout", True) from None
         except ssl.SSLError:
             raise ProviderError("provider_tls") from None
         except (OSError, http.client.HTTPException):
-            raise ProviderError("provider_timeout" if connection.expired.is_set() else "provider_transport", True) from None
+            raise ProviderError(
+                "provider_timeout" if connection.expired.is_set() else "provider_transport", True
+            ) from None
         except (ValueError, UnicodeError):
-            raise ProviderError("provider_timeout" if connection.expired.is_set() else "provider_format") from None
+            raise ProviderError(
+                "provider_timeout" if connection.expired.is_set() else "provider_format"
+            ) from None
         finally:
             timer.cancel()
             if response:

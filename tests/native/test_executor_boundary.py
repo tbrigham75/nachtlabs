@@ -1,11 +1,11 @@
 """Explicit opt-in Linux/root qualification tests. Never part of unattended acceptance."""
+
 import json
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 
 import pytest
-
 from nachtlabs.errors import DomainError
 from nachtlabs.execution import sandbox
 from nachtlabs.execution.catalog import CATALOG, trusted_file
@@ -21,6 +21,7 @@ def native():
     if os.geteuid() != 0:
         pytest.skip("Native qualification requires Linux root")
     import fcntl
+
     sandbox.ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (sandbox.ROOT / "broker.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -29,6 +30,7 @@ def native():
         policy = {"timeout_seconds": 10, "max_output_bytes": 4096, "max_workspace_bytes": 1048576}
         with sandbox.Workspace(policy["max_workspace_bytes"]) as workspace:
             import tempfile
+
             with tempfile.TemporaryDirectory(dir=sandbox.ROOT) as name:
                 inputs = Path(name)
                 inputs.chmod(0o755)
@@ -46,14 +48,23 @@ except (PermissionError,FileNotFoundError):
 else:
     raise SystemExit(7)
 """
-    result = sandbox.run(["/usr/bin/python3", "-c", code], work, inputs, configuration, policy, lambda: False)
+    result = sandbox.run(
+        ["/usr/bin/python3", "-c", code], work, inputs, configuration, policy, lambda: False
+    )
     assert result.code == 0 and (work / "observation").read_text() == "denied"
 
 
 def test_output_limit_stops_job(native):
     work, inputs, configuration, policy = native
     with pytest.raises(DomainError) as raised:
-        sandbox.run(["/usr/bin/python3", "-c", "print('x'*100000)"], work, inputs, configuration, policy, lambda: False)
+        sandbox.run(
+            ["/usr/bin/python3", "-c", "print('x'*100000)"],
+            work,
+            inputs,
+            configuration,
+            policy,
+            lambda: False,
+        )
     assert raised.value.code == "output_budget"
     assert not sandbox.ACTIVE.exists()
 
@@ -63,8 +74,14 @@ def test_cancel_covers_forked_child(native):
     started = time.monotonic()
     code = "import subprocess,time; subprocess.Popen(['/usr/bin/python3','-c','import time; time.sleep(60)']); time.sleep(60)"
     with pytest.raises(DomainError) as raised:
-        sandbox.run(["/usr/bin/python3", "-c", code], work, inputs, configuration, policy,
-                    lambda: time.monotonic() - started > 2)
+        sandbox.run(
+            ["/usr/bin/python3", "-c", code],
+            work,
+            inputs,
+            configuration,
+            policy,
+            lambda: time.monotonic() - started > 2,
+        )
     assert raised.value.code == "cancelled"
     assert not sandbox.ACTIVE.exists()
 
@@ -79,5 +96,7 @@ except OSError:
 else:
     raise SystemExit(8)
 """
-    result = sandbox.run(["/usr/bin/python3", "-c", code], work, inputs, configuration, policy, lambda: False)
+    result = sandbox.run(
+        ["/usr/bin/python3", "-c", code], work, inputs, configuration, policy, lambda: False
+    )
     assert result.code == 0

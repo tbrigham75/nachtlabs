@@ -1,10 +1,24 @@
 """Durable workflow, executor, evidence and monitoring persistence."""
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
+
 from nachtlabs.models import Base, Record, now
 
 
@@ -112,10 +126,15 @@ class ExecutorJob(Record, Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unit_name: Mapped[str | None] = mapped_column(String(100))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (UniqueConstraint("run_id", "stage", "attempt"),
-                      Index("one_active_factory_execution", text("(1)"), unique=True,
-                            postgresql_where=text("state IN ('claimed','running')")),
-                      )
+    __table_args__ = (
+        UniqueConstraint("run_id", "stage", "attempt"),
+        Index(
+            "one_active_factory_execution",
+            text("(1)"),
+            unique=True,
+            postgresql_where=text("state IN ('claimed','running')"),
+        ),
+    )
 
 
 class WebhookBinding(Record, Base):
@@ -205,6 +224,7 @@ class RetentionPolicy(Base):
     log_days: Mapped[int] = mapped_column(Integer, default=30)
     artifact_days: Mapped[int] = mapped_column(Integer, default=90)
     version: Mapped[int] = mapped_column(Integer, default=1)
+
 
 class OperationalEvent(Record, Base):
     __tablename__ = "operational_events"

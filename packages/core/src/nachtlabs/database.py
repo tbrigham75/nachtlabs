@@ -11,7 +11,10 @@ from nachtlabs.settings import get_settings
 def engine() -> Engine:
     return create_engine(
         get_settings().database_url.get_secret_value(),
-        pool_pre_ping=True, pool_size=5, max_overflow=5, hide_parameters=True,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=5,
+        hide_parameters=True,
         connect_args={"connect_timeout": 5},
     )
 
@@ -25,6 +28,9 @@ def limiter_engine() -> Engine:
     # Independent transactions must not compete with all checked-out request connections.
     return create_engine(
         get_settings().database_url.get_secret_value(),
-        pool_pre_ping=True, pool_size=2, max_overflow=2, hide_parameters=True,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=2,
+        hide_parameters=True,
         connect_args={"connect_timeout": 5},
     )

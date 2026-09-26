@@ -9,19 +9,32 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def fingerprint(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
 
 
 def safe_ref(value: str) -> str:
-    if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,199}", value) or ".." in value
-            or "//" in value or value.endswith(("/", ".", ".lock"))):
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,199}", value)
+        or ".." in value
+        or "//" in value
+        or value.endswith(("/", ".", ".lock"))
+    ):
         raise ValueError("Invalid branch/ref")
     return value
 
 
 def safe_relative(value: str) -> str:
     path = PurePosixPath(value)
-    if not value or value in {".", "./"} or path.is_absolute() or ".." in path.parts or "\\" in value or any(ord(c) < 32 for c in value):
+    if (
+        not value
+        or value in {".", "./"}
+        or path.is_absolute()
+        or ".." in path.parts
+        or "\\" in value
+        or any(ord(c) < 32 for c in value)
+    ):
         raise ValueError("Use a repository-relative path without parent traversal")
     return value
 
@@ -94,7 +107,9 @@ class Plan(Strict):
     dependencies: list[str] = Field(default_factory=list, max_length=30)
     test_strategy: list[str] = Field(min_length=1, max_length=30)
     criteria_mapping: dict[str, list[str]]
-    mission_alignment: Literal["aligned", "partially_aligned", "unclear", "out_of_scope", "conflicts"]
+    mission_alignment: Literal[
+        "aligned", "partially_aligned", "unclear", "out_of_scope", "conflicts"
+    ]
     mission_reason: str = Field(min_length=1, max_length=4000)
     journey_ids: list[str] = Field(default_factory=list)
 
@@ -102,13 +117,18 @@ class Plan(Strict):
     def bounded(self) -> "Plan":
         for value in self.affected_files:
             safe_relative(value)
-        if any(len(v) > 2000 for v in [*self.steps, *self.risks, *self.dependencies, *self.test_strategy]):
+        if any(
+            len(v) > 2000
+            for v in [*self.steps, *self.risks, *self.dependencies, *self.test_strategy]
+        ):
             raise ValueError("Plan entries exceed limits")
         return self
 
 
 class VerifierFinding(Strict):
-    verdict: Literal["pass", "pass_with_warnings", "needs_rework", "failed", "human_review_required"]
+    verdict: Literal[
+        "pass", "pass_with_warnings", "needs_rework", "failed", "human_review_required"
+    ]
     summary: str = Field(min_length=1, max_length=4000)
     criteria: dict[str, bool]
     concerns: list[str] = Field(default_factory=list, max_length=30)

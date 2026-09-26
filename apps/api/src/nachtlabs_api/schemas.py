@@ -102,13 +102,17 @@ class MissionContent(Input):
 
 class JourneyContent(Input):
     description: str = Field(min_length=1, max_length=4000)
-    category: Literal["critical_path", "regression", "security", "usability", "api", "integration"] = "critical_path"
+    category: Literal[
+        "critical_path", "regression", "security", "usability", "api", "integration"
+    ] = "critical_path"
     preconditions: str = Field(default="", max_length=4000)
     test_data: str = Field(default="", max_length=4000)
     steps: str = Field(min_length=1, max_length=8000)
     expected_outcomes: str = Field(min_length=1, max_length=4000)
     evidence_requirements: str = Field(min_length=1, max_length=4000)
-    execution_type: Literal["manual", "script", "api", "browser", "integration", "external"] = "manual"
+    execution_type: Literal["manual", "script", "api", "browser", "integration", "external"] = (
+        "manual"
+    )
     command_reference: str | None = Field(default=None, max_length=200)
     approval_role: Literal["owner", "admin", "operator"] = "operator"
     required_on: list[str] = Field(default_factory=lambda: ["standard"], max_length=20)
@@ -144,4 +148,3 @@ class KeyInput(Input):
     scopes: list[str] = Field(min_length=1, max_length=10)
     project_ids: list[UUID] = Field(min_length=1, max_length=100)
     expires_at: datetime | None = None
-

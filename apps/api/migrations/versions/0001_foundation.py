@@ -1,4 +1,5 @@
 """Immutable Checkpoint A schema snapshot; do not import current application metadata."""
+
 from pathlib import Path
 
 from alembic import op
@@ -15,4 +16,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("Initial schema downgrade is destructive. Restore an isolated backup instead.")
+    raise RuntimeError(
+        "Initial schema downgrade is destructive. Restore an isolated backup instead."
+    )

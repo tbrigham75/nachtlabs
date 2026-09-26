@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 class ProviderError(Exception):
     """Only a fixed classification is safe to return to callers."""
+
     def __init__(self, code: str, retryable: bool = False):
         super().__init__(code)
         self.code = code
@@ -53,4 +54,6 @@ class ModelResult:
 
 class ModelProvider(Protocol):
     def discover(self, page: int = 1) -> Discovery: ...
-    def chat(self, model: str, messages: list[dict[str, str]], temperature: float = 0.2) -> ModelResult: ...
+    def chat(
+        self, model: str, messages: list[dict[str, str]], temperature: float = 0.2
+    ) -> ModelResult: ...

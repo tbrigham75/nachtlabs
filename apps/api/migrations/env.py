@@ -1,10 +1,9 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 from alembic import context
-from sqlalchemy import create_engine, pool
-
 from nachtlabs.models import Base
+from sqlalchemy import create_engine, pool
 
 credential = os.environ.get("NACHTLABS_MIGRATION_DATABASE_URL_FILE")
 if not credential:
@@ -21,4 +20,3 @@ else:
         context.configure(connection=connection, target_metadata=Base.metadata, compare_type=True)
         with context.begin_transaction():
             context.run_migrations()
-

@@ -1,4 +1,5 @@
 """Raw-body verification primitives. No public webhook intake or workflow dispatch in M4."""
+
 import hashlib
 import hmac
 import re
@@ -26,4 +27,6 @@ def delivery_fingerprint(connection_id: str, delivery_id: str, body: bytes) -> t
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", delivery_id):
         raise ProviderError("webhook_rejected")
     # Future intake must UNIQUE the first key and reject same-ID/different-body reuse.
-    return hashlib.sha256(f"{connection_id}:{delivery_id}".encode()).hexdigest(), hashlib.sha256(body).hexdigest()
+    return hashlib.sha256(f"{connection_id}:{delivery_id}".encode()).hexdigest(), hashlib.sha256(
+        body
+    ).hexdigest()

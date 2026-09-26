@@ -85,7 +85,7 @@ CREATE INDEX ix_audit_events_org_id ON audit_events(org_id);
 CREATE INDEX ix_audit_events_project_id ON audit_events(project_id);
 CREATE INDEX ix_audit_events_action ON audit_events(action);
 CREATE INDEX audit_cursor ON audit_events(created_at,id);
-CREATE TABLE rate_buckets (key varchar(64) PRIMARY KEY, window integer NOT NULL, count integer NOT NULL);
+CREATE TABLE rate_buckets (key varchar(64) PRIMARY KEY, "window" integer NOT NULL, count integer NOT NULL);
 CREATE TABLE mail_jobs (
  id uuid PRIMARY KEY, created_at timestamptz NOT NULL, payload text, state varchar(20) NOT NULL,
  attempts integer NOT NULL, next_attempt_at timestamptz NOT NULL, lease_until timestamptz,

@@ -1,31 +1,52 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test('operator can sign in, create governance, and change theme', async ({page}) => {
- test.skip(!process.env.NACHTLABS_E2E_URL || !process.env.NACHTLABS_E2E_EMAIL || !process.env.NACHTLABS_E2E_PASSWORD, 'Operator must provide an isolated test Owner');
- await page.goto('/login');
- await page.getByLabel('Email address').fill(process.env.NACHTLABS_E2E_EMAIL!);
- await page.getByLabel('Password', {exact:true}).fill(process.env.NACHTLABS_E2E_PASSWORD!);
- await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Engineering overview'})).toBeVisible();
- await page.goto('/projects/new');
- await page.getByLabel(/Project name/).fill('Acceptance fixture');
- await page.getByLabel(/Project slug/).fill(`acceptance-${Date.now()}`);
- await page.getByRole('button',{name:'Create project',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Acceptance fixture'})).toBeVisible();
- await page.getByRole('link',{name:'Validation Journeys',exact:true}).click();
- await page.getByRole('button',{name:/Add scenario/}).click();
- await page.getByLabel('Name', {exact:false}).fill('Sign-in journey');
- await page.getByLabel(/Outcome this Journey validates/).fill('An authorized user reaches the overview');
- await page.getByLabel('Steps', {exact:false}).fill('Sign in and inspect the overview');
- await page.getByLabel(/Expected outcomes/).fill('The overview is visible');
- await page.getByLabel(/Required evidence/).fill('Sanitized operator observation');
- await page.getByLabel(/Journey owner/).fill('Acceptance owner');
- await page.getByRole('button',{name:'Save new version'}).click();
- await page.getByRole('button',{name:'Approve version 1'}).click();
- await expect(page.getByText('Approved',{exact:true})).toBeVisible();
- await page.goto('/settings/themes');
- await page.getByRole('button',{name:/Graphite/}).click();
- await expect(page.locator('html')).toHaveAttribute('data-theme','graphite');
- await page.reload();
- await expect(page.locator('html')).toHaveAttribute('data-theme','graphite');
+test("operator can sign in, create governance, and change theme", async ({
+  page,
+}) => {
+  test.skip(
+    !process.env.NACHTLABS_E2E_URL ||
+      !process.env.NACHTLABS_E2E_EMAIL ||
+      !process.env.NACHTLABS_E2E_PASSWORD,
+    "Operator must provide an isolated test Owner",
+  );
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(process.env.NACHTLABS_E2E_EMAIL!);
+  await page.getByLabel(/^Password/).fill(process.env.NACHTLABS_E2E_PASSWORD!);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Engineering overview" }),
+  ).toBeVisible();
+  await page.goto("/projects/new");
+  await page.getByLabel(/Project name/).fill("Acceptance fixture");
+  await page.getByLabel(/Project slug/).fill(`acceptance-${Date.now()}`);
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Acceptance fixture" }),
+  ).toBeVisible();
+  await page
+    .getByRole("link", { name: "Validation Journeys", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Add scenario/ }).click();
+  await page.getByLabel("Name", { exact: false }).fill("Sign-in journey");
+  await page
+    .getByLabel(/Outcome this Journey validates/)
+    .fill("An authorized user reaches the overview");
+  await page
+    .getByLabel("Steps", { exact: false })
+    .fill("Sign in and inspect the overview");
+  await page.getByLabel(/Expected outcomes/).fill("The overview is visible");
+  await page
+    .getByLabel(/Required evidence/)
+    .fill("Sanitized operator observation");
+  await page.getByLabel(/Journey owner/).fill("Acceptance owner");
+  await page.getByRole("button", { name: "Save new version" }).click();
+  await page.getByRole("button", { name: "Approve version 1" }).click();
+  await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+  await page.goto("/settings/themes");
+  await page.getByRole("button", { name: /Graphite/ }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
 });

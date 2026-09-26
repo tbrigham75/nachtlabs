@@ -102,6 +102,60 @@ if [[ -f .env ]]; then
   fi
 fi
 
+head2 "Origin check (why a form can look dead)"
+# A GET never reaches browser_origin, and a mutating endpoint rejects an invalid
+# body during validation before that check runs. So the only honest way to ask
+# "would a POST from this browser be accepted?" is to ask the API, which is what
+# /auth/preflight does. It mutates nothing.
+public_url=""
+for candidate in .env /etc/nachtlabs/api.env; do
+  if [[ -r "$candidate" ]]; then
+    public_url="$(sed -n 's/^NACHTLABS_PUBLIC_URL=//p' "$candidate" | tr -d "\"'\''" | tail -1)"
+    [[ -n "$public_url" ]] && break
+  fi
+done
+if [[ -z "$public_url" ]]; then
+  warn "could not read NACHTLABS_PUBLIC_URL from .env or /etc/nachtlabs/api.env"
+  warn "set NACHTLABS_DIAGNOSE_ORIGIN=https://your-host to check by hand"
+else
+  printf '  PUBLIC_URL : %s\n' "$public_url"
+  if [[ "$public_url" == https://* ]]; then
+    ok "PUBLIC_URL is https, so session cookies will be issued Secure"
+  else
+    warn "PUBLIC_URL is not https; session cookies will not be Secure"
+  fi
+  # Always reach the configured origin, but send whichever origin the browser
+  # would send. Setting NACHTLABS_DIAGNOSE_ORIGIN to the address you actually
+  # type into the browser reproduces a host mismatch exactly.
+  browser_origin="${NACHTLABS_DIAGNOSE_ORIGIN:-$public_url}"
+  if [[ "$browser_origin" != "$public_url" ]]; then
+    warn "testing as browser origin $browser_origin (configured: $public_url)"
+  fi
+  pre="$(curl -s --max-time 8 -H "Origin: $browser_origin" "$public_url/api/v1/auth/preflight" 2>/dev/null || true)"
+  if [[ -z "$pre" ]]; then
+    bad "could not reach /auth/preflight at $public_url"
+    bad "the reverse proxy is probably not forwarding /api/ to the API"
+  else
+    printf '  %s\n' "$pre"
+    case "$pre" in
+      *'"origin_accepted":true'*)
+        ok "this origin is accepted, so creating the first account will work"
+        ;;
+      *'"origin_accepted":false'*)
+        bad "this origin is REFUSED, so every create/sign-in POST returns 403 origin"
+        bad "compare origin and expected above, correct NACHTLABS_PUBLIC_URL, then:"
+        bad "  sudo systemctl restart nachtlabs-api"
+        ;;
+      *) warn "unrecognised preflight response" ;;
+    esac
+    case "$pre" in
+      *'"setup_token_required":true'*)
+        warn "first-account creation also requires the one-time setup token"
+        ;;
+    esac
+  fi
+fi
+
 head2 "Services"
 # systemctl prints its own state and still exits non-zero, so capture once and
 # normalise rather than appending a second line onto the first.

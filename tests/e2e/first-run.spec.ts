@@ -208,17 +208,28 @@ test.describe("setup is always discoverable", () => {
     ).toHaveCount(1);
   });
 
-  test("first-time setup disappears from sign-in once an account exists", async ({
+  test("the setup link cannot be removed by a wrong setup-status", async ({
     page,
   }) => {
+    // Regression: the link used to be hidden when setup-status said an account
+    // existed. If that flag is ever wrong, hiding it removed the only route to
+    // registering, which is how an operator got locked out. It must stay.
     await mock(page, true);
     await page.goto("/login");
-    // It has done its job, so the link retires itself.
     await expect(
       page.getByRole("link", { name: "First-time setup" }),
-    ).toHaveCount(0);
-    // Recovery guidance stays, because the credential may still be unknown.
+    ).toHaveCount(1);
+    // Recovery guidance is on the sign-in page, because the credential may be
+    // unknown even though setup is closed.
     await expect(page.locator(".auth-help")).toContainText(
+      "make recover-owner",
+    );
+    // Following the link lands on /setup, which explains rather than bounces.
+    await page.getByRole("link", { name: "First-time setup" }).click();
+    await expect(page).toHaveURL(/\/setup$/);
+    await expect(page.getByText("An account already exists")).toBeVisible();
+    // And the page it lands on names the operator-side recovery too.
+    await expect(page.locator(".notice").first()).toContainText(
       "make recover-owner",
     );
   });

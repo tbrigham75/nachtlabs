@@ -216,3 +216,32 @@ def test_setup_closes_permanently_and_defaults_descriptive_fields(
         json={"email": "fourth@example.com", "password": new_token(), "password_confirm": "x"},
     )
     assert rejected.status_code == 422
+
+
+def test_preflight_reports_origin_mismatch(client: TestClient) -> None:
+    """The diagnostic an operator runs when a form looks dead must be honest.
+
+    A GET never reaches browser_origin, so this is the only way to learn whether
+    a mutating request from the browser would be accepted, without creating an
+    account to find out.
+    """
+    expected = get_settings().public_url
+    accepted = client.get("/api/v1/auth/preflight", headers={"Origin": expected}).json()
+    assert accepted["origin_accepted"] is True
+    assert accepted["expected"] == expected
+    assert accepted["origin"] == expected
+    assert accepted["hint"] is None
+    assert "initialized" in accepted
+    assert "setup_token_required" in accepted
+
+    refused = client.get(
+        "/api/v1/auth/preflight", headers={"Origin": "https://not-this-host.invalid"}
+    ).json()
+    assert refused["origin_accepted"] is False
+    assert refused["origin"] == "https://not-this-host.invalid"
+    assert refused["expected"] == expected
+    assert refused["hint"]
+
+    # A same-origin POST with an empty body is rejected by validation, which is
+    # why an empty-body probe cannot detect an origin problem.
+    assert client.post("/api/v1/auth/setup", json={}).status_code == 422

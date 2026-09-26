@@ -55,11 +55,18 @@ first one.
 
 ## Updating an installation
 `install-systemd.sh` does not build, so a pulled commit is not compiled. Use `make diagnose-setup`
-to check whether the served bundle is current, then `make update` to pull, rebuild, restart and
-health-check. Both are described in [upgrade and recovery](docs/operations/upgrade-and-recovery.md).
+to check whether the served bundle is current and whether your origin is accepted, then
+`make update` to pull, rebuild, restart and health-check. Both are described in
+[upgrade and recovery](docs/operations/upgrade-and-recovery.md).
+
+To discard everything and return to a pre-first-run state, `sudo make reset-first-run`. It empties
+the database and the build but preserves the credentials and master key under `/etc/nachtlabs`.
+
+If the first-run form appears but submitting it does nothing, your browser's origin almost certainly
+does not match `NACHTLABS_PUBLIC_URL`; `make diagnose-setup` reports the exact mismatch.
 
 ## Operator commands
-make setup, make configure, make update, make diagnose-setup, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
+make setup, make configure, make update, make diagnose-setup, make reset-first-run, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
 
 Follow handoff ordering. Generate actual lockfiles and OpenAPI/TypeScript declarations on Linux; none were fabricated. The source-only review is recorded in docs/planning/source-review-m10.md.
 

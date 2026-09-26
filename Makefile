@@ -1,10 +1,12 @@
-.PHONY: setup configure recover-owner update diagnose-setup dev build test test-integration test-e2e lint typecheck format format-check migrate migration-check api-client api-client-check secret-scan dependency-audit seed backup restore install-systemd healthcheck logs
+.PHONY: setup configure recover-owner update diagnose-setup reset-first-run dev build test test-integration test-e2e lint typecheck format format-check migrate migration-check api-client api-client-check secret-scan dependency-audit seed backup restore install-systemd healthcheck logs
 setup:
 	bash scripts/setup.sh
 update:
 	bash scripts/update.sh
 diagnose-setup:
 	bash scripts/diagnose-setup.sh
+reset-first-run:
+	bash scripts/reset-first-run.sh
 configure:
 	@printf '%s\n' 'Creates /etc/nachtlabs credentials and service env files. Run as root, once, after install-systemd.sh.'
 	@printf '%s\n' '  sudo python3 scripts/configure.py --origin https://your-host [--development]'

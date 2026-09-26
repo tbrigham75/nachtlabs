@@ -63,6 +63,35 @@ def setup_status(db: DB) -> dict[str, bool]:
     return {"initialized": db.scalar(select(Organization.id)) is not None}
 
 
+@router.get("/preflight")
+def preflight(request: Request, db: DB) -> dict[str, Any]:
+    """Report whether a mutating request from this origin would be accepted.
+
+    A GET never reaches browser_origin, and any mutating endpoint rejects an
+    invalid body during validation before that check runs, so a probe cannot
+    distinguish "origin refused" from "bad input" without creating an account.
+    This answers it directly and mutates nothing.
+
+    It reports the configured public URL so an operator can see the exact
+    mismatch rather than infer it. That is operator-facing configuration on a
+    single-tenant self-hosted console, comparable to what setup-status already
+    discloses, and it is not reachable to learn anything about accounts.
+    """
+    settings = get_settings()
+    seen = request.headers.get("origin")
+    accepted = seen == settings.public_url
+    return {
+        "origin": seen,
+        "expected": settings.public_url,
+        "origin_accepted": accepted,
+        "setup_token_required": settings.setup_token_required,
+        "initialized": db.scalar(select(Organization.id)) is not None,
+        "hint": None
+        if accepted or seen is None
+        else "NACHTLABS_PUBLIC_URL must match this browser's origin exactly",
+    }
+
+
 @router.post("/setup", status_code=201, response_model=UserOutput)
 def setup(body: Setup, request: Request, response: Response, db: DB) -> dict[str, Any]:
     browser_origin(request)

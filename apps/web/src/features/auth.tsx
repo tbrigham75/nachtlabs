@@ -337,17 +337,15 @@ export function AuthScreen({
           </>
         )}
         <div className="auth-links">
-          {/*
-              Fails open. The link is hidden only when setup-status positively
-              reports that an account already exists; when the answer is false
-              or unknown it stays visible, because hiding it on an unknown
-              answer is what removed the only route to registering. A visible
-              link that explains itself is safer than an invisible one.
-            */}
           {login ? (
-            initialized === true ? null : (
-              <Link href="/setup">First-time setup</Link>
-            )
+            /*
+              Permanently present. This is the one affordance that must not
+              depend on setup-status being right: a flag that wrongly says an
+              account exists would otherwise remove the only route to
+              registering. On an initialized install it leads to a page that
+              explains, and after a successful first run nobody returns here.
+            */
+            <Link href="/setup">First-time setup</Link>
           ) : firstRun || setupClosed ? null : (
             <>
               <Link href="/login">Sign in</Link>

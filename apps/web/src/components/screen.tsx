@@ -58,6 +58,12 @@ function destination(input: {
   if (setupUnreachable) return null;
   if (mfaRequired && !["/mfa/setup", "/settings/security"].includes(path))
     return "/mfa/setup";
+  // Fail-safe direction only. This fires on a positive "no account exists", so a
+  // wrong or missing answer leaves the operator where they are rather than
+  // stranding them. The dangerous direction is the opposite one, a wrongly
+  // reported "true", so the sign-in page keeps the setup link permanently and
+  // /setup always explains itself. Nothing here can make registration
+  // unreachable.
   if (initialized === false && !signedInPath(path)) return "/setup";
   // Deliberately no "/setup" -> "/login" redirect. Bouncing a visitor off the
   // setup page looked like a broken refresh and hid the reason they could not

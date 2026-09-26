@@ -226,6 +226,7 @@ def create_app() -> FastAPI:
         schema_data["security"] = [{"SessionCookie": []}, {"ScopedAPIKey": []}]
         public = {
             "/auth/setup-status",
+            "/auth/preflight",
             "/auth/setup",
             "/auth/login",
             "/auth/mfa/verify",

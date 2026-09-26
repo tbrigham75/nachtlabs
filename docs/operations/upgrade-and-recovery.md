@@ -1,6 +1,40 @@
 # Upgrade, interruption and recovery
 Status: authored procedure; NOT RUN.
 
+## Start over: reset to a pre-first-run state
+If an installation is in a state where the first-run page will not behave, discard everything and
+begin again:
+
+    sudo make reset-first-run
+
+This empties the database, re-applies migrations, deletes the web build, rebuilds, and restarts, so
+the next page load must offer Owner setup. It refuses unless it is root, the tree is
+`/opt/nachtlabs`, and the working tree is clean; it prints the row counts it is about to destroy and
+requires you to type `RESET`; and it requires `--force` if anything beyond a first account exists —
+runs, evidence, integrations or audit history.
+
+It does **not** touch `/etc/nachtlabs`. Credentials, the master key and every service env file are
+preserved, so `configure.py` does not need to run again and no secret is rotated. A reset is
+therefore a way to fix application state, not to recover a lost credential; for that use
+`make recover-owner`.
+
+Deleting `apps/web/.next` matters. A stale bundle is the most common reason a first-run page appears
+not to update, because `install-systemd.sh` does not build.
+
+## Why a working form can still fail to submit
+A first-run form that renders but does nothing is nearly always an origin mismatch, and it is
+invisible in the status endpoints. `GET /auth/setup-status` is a GET, so it answers 200 with
+`{"initialized": false}` and the installation looks healthy, while every POST that would create the
+account is refused with `403 origin`. `browser_origin` requires the request `Origin` to equal
+`NACHTLABS_PUBLIC_URL` exactly, so `https://nachtlabs.example.com` configured against a browser on
+`https://www.nachtlabs.example.com` fails every write and no read.
+
+`make diagnose-setup` checks this. It calls `GET /auth/preflight`, a public, non-mutating endpoint
+that reports the origin it saw, the origin it expected, and whether they match, and it prints the
+exact fix. To reproduce a host mismatch deliberately:
+
+    NACHTLABS_DIAGNOSE_ORIGIN=https://www.example.com make diagnose-setup
+
 ## Routine update to a new commit
 `install-systemd.sh` installs users, directories and units. It deliberately does **not** build, so a
 pulled commit is never compiled and `git pull` on its own changes nothing an operator can see. A

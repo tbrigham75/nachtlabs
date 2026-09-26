@@ -1,0 +1,132 @@
+import { test, expect } from "@playwright/test";
+
+// First-run routing only. /auth/setup-status is mocked because a real
+// uninitialized installation needs its own database and bootstrap token.
+const id = "00000000-0000-4000-8000-000000000002";
+
+async function mock(
+  page: import("@playwright/test").Page,
+  initialized: boolean,
+) {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/stream"))
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: ": heartbeat\n\n",
+      });
+    const data = path.endsWith("/auth/me")
+      ? { status: 401 }
+      : path.endsWith("/auth/setup-status")
+        ? { initialized }
+        : {};
+    if (path.endsWith("/auth/me"))
+      return route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "unauthenticated", message: "Sign in to continue" },
+        }),
+      });
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(data),
+    });
+  });
+}
+
+test.describe("first-run discovery", () => {
+  test("an installation with no account offers Owner setup instead of sign-in", async ({
+    page,
+  }) => {
+    await mock(page, false);
+    await page.goto("/");
+    // Must not leave the operator staring at a sign-in form they cannot use.
+    await expect(page).toHaveURL(/\/setup$/);
+    await expect(
+      page.getByRole("heading", { name: "Welcome to NachtLabs" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Welcome back" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Create Owner account" }),
+    ).toBeVisible();
+    // The form offered must be setup, not a sign-in form nobody can satisfy.
+    await expect(page.getByLabel(/One-time setup token/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in" })).toHaveCount(0);
+  });
+
+  test("every unauthenticated entry point routes to setup when uninitialized", async ({
+    page,
+  }) => {
+    await mock(page, false);
+    for (const path of ["/login", "/forgot-password", "/accept-invitation"]) {
+      await page.goto(path);
+      await expect(page).toHaveURL(/\/setup$/);
+    }
+  });
+
+  test("setup is not offered once an account exists", async ({ page }) => {
+    await mock(page, true);
+    await page.goto("/setup");
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(
+      page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Create Owner account" }),
+    ).toHaveCount(0);
+  });
+
+  test("the first-run prompt disappears after initialization", async ({
+    page,
+  }) => {
+    await mock(page, true);
+    await page.goto("/login");
+    await expect(page.getByLabel(/^Email address/)).toBeVisible();
+    await expect(page.getByText(/Create the Owner account/)).toHaveCount(0);
+  });
+
+  test("an authenticated operator is never bounced to setup", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/stream"))
+        return route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: ": heartbeat\n\n",
+        });
+      const data = path.endsWith("/auth/me")
+        ? {
+            id,
+            name: "Owner",
+            email: "owner@acme.example",
+            role: "owner",
+            active: true,
+            theme: "canvas",
+            version: 1,
+            mfa_required: false,
+          }
+        : path.endsWith("/auth/setup-status")
+          ? { initialized: true }
+          : path.endsWith("/overview")
+            ? { worker: "online" }
+            : {};
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data),
+      });
+    });
+    await page.goto("/overview");
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(
+      page.getByRole("heading", { name: "Engineering overview" }),
+    ).toBeVisible();
+  });
+});

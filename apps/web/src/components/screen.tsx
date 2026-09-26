@@ -23,6 +23,11 @@ const publicPaths = [
   "/accept-invitation",
   "/mfa/verify",
 ];
+// Password reset and invitation links are unusable until an account exists, so
+// they must not compete with Owner setup.
+function signedInPath(path: string) {
+  return path === "/setup" || path === "/mfa/verify";
+}
 export function Screen() {
   const path = usePathname();
   const router = useRouter();
@@ -33,16 +38,37 @@ export function Screen() {
     enabled: !publicPage,
     refetchOnWindowFocus: true,
   });
+  // An installation with no account yet has to offer Owner setup before it can
+  // offer sign-in, otherwise a first-time operator is asked to log in to an
+  // installation nobody has registered on.
+  const setup = useQuery({
+    queryKey: ["setup-status"],
+    queryFn: () => api<{ initialized: boolean }>("/auth/setup-status"),
+    enabled: publicPage || me.isError,
+    staleTime: 30_000,
+  });
+  const initialized = setup.data?.initialized;
+  const signedOut =
+    me.isError && me.error instanceof ApiError && me.error.status === 401;
   useEffect(() => {
-    if (!publicPage && me.error instanceof ApiError && me.error.status === 401)
-      router.replace("/login");
+    if (!publicPage && signedOut) router.replace("/login");
+    if (initialized === false && !signedInPath(path)) router.replace("/setup");
+    if (initialized === true && path === "/setup") router.replace("/login");
     if (
       me.data?.mfa_required &&
       !["/mfa/setup", "/settings/security"].includes(path)
     )
       router.replace("/mfa/setup");
-  }, [me.error, me.data, path, publicPage, router]);
-  if (publicPage) return <AuthScreen key={path} path={path} />;
+  }, [me.error, me.data, initialized, path, publicPage, router, signedOut]);
+  if (publicPage)
+    return (
+      <AuthScreen
+        key={path}
+        path={path}
+        initialized={initialized}
+        checkingSetup={setup.isPending}
+      />
+    );
   if (me.isPending) return <Loading />;
   if (me.error) return <ErrorNotice error={me.error} />;
   if (!me.data) return null;

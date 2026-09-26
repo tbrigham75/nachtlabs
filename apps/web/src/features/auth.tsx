@@ -7,7 +7,15 @@ import { Moon } from "lucide-react";
 import { write } from "@nachtlabs/api-client";
 import { Form, type Field } from "@/components/ui";
 
-export function AuthScreen({ path }: { path: string }) {
+export function AuthScreen({
+  path,
+  initialized,
+  checkingSetup,
+}: {
+  path: string;
+  initialized?: boolean;
+  checkingSetup: boolean;
+}) {
   const router = useRouter();
   const client = useQueryClient();
   const [challenge, setChallenge] = useState<string>();
@@ -28,17 +36,23 @@ export function AuthScreen({ path }: { path: string }) {
   const setup = path === "/setup";
   const forgot = path === "/forgot-password";
   const invitation = path === "/accept-invitation";
-  const title = challenge
-    ? "Verify your identity"
-    : setup
-      ? "Initialize NachtLabs"
-      : forgot
-        ? "Reset your password"
-        : invitation
-          ? "Accept your invitation"
-          : login
-            ? "Welcome back"
-            : "Choose a new password";
+  // Nobody has registered on this installation yet, so there is nothing to sign
+  // in to. Offer Owner setup instead of a form that cannot succeed.
+  const firstRun = initialized === false;
+  const setupClosed = initialized === true && setup;
+  const title = firstRun
+    ? "Welcome to NachtLabs"
+    : challenge
+      ? "Verify your identity"
+      : setup
+        ? "Initialize NachtLabs"
+        : forgot
+          ? "Reset your password"
+          : invitation
+            ? "Accept your invitation"
+            : login
+              ? "Welcome back"
+              : "Choose a new password";
   const fields: Field[] = challenge
     ? [
         {
@@ -153,11 +167,35 @@ export function AuthScreen({ path }: { path: string }) {
       <main className="auth">
         <h1>{title}</h1>
         <p>
-          {setup
-            ? "The first account becomes the Owner. Public setup closes after initialization."
-            : "Your organization’s engineering control plane."}
+          {firstRun
+            ? "No account exists on this installation yet. Create the first one; it becomes the Owner and setup then closes."
+            : setup
+              ? "The first account becomes the Owner. Public setup closes after initialization."
+              : setupClosed
+                ? "This installation is already initialized. Sign in, or use a password reset link."
+                : "Your organization’s engineering control plane."}
         </p>
-        {message ? (
+        {firstRun && !setup ? (
+          <div className="notice" role="status">
+            <p>
+              {checkingSetup
+                ? "Checking whether this installation has been initialized…"
+                : "Owner setup is required before anyone can sign in."}
+            </p>
+            {setup ? null : (
+              <Link className="button primary" href="/setup">
+                Create the Owner account
+              </Link>
+            )}
+          </div>
+        ) : setupClosed ? (
+          <div className="notice" role="status">
+            <p>Setup has already been completed on this installation.</p>
+            <Link className="button primary" href="/login">
+              Sign in
+            </Link>
+          </div>
+        ) : message ? (
           <div className="notice success" role="status">
             {message}
           </div>
@@ -218,11 +256,9 @@ export function AuthScreen({ path }: { path: string }) {
           />
         )}
         <div className="auth-links">
-          <Link href="/login">Sign in</Link>
-          {login ? (
+          {firstRun || setupClosed ? null : <Link href="/login">Sign in</Link>}
+          {firstRun || setupClosed || login ? null : (
             <Link href="/forgot-password">Forgot password?</Link>
-          ) : (
-            <Link href="/setup">Initial setup</Link>
           )}
         </div>
         <small style={{ marginTop: 24 }}>

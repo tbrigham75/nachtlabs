@@ -21,7 +21,8 @@ class Setup(Login):
     password: SecretStr = Field(min_length=12, max_length=128)
     name: str = Field(min_length=1, max_length=120)
     organization: str = Field(min_length=1, max_length=120)
-    bootstrap_token: SecretStr
+    # Only consulted when NACHTLABS_SETUP_TOKEN_REQUIRED is enabled.
+    bootstrap_token: SecretStr | None = None
 
 
 class EmailInput(Input):

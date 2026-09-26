@@ -39,32 +39,40 @@ def user_view(user: User) -> dict[str, Any]:
 def bootstrap(
     db: Session,
     context: AuditContext,
-    token: str,
+    token: str | None,
     email: str,
     name: str,
     password: str,
     organization: str,
 ) -> User:
+    """Create the organization and its first Owner.
+
+    The advisory lock is what makes "the first account wins" race-free, so it
+    guards this before anything is read. A setup token is only demanded when the
+    operator opted in, which keeps an internet-facing installation from being
+    claimed by whoever finds the port first.
+    """
     db.execute(text("SELECT pg_advisory_xact_lock(9182701)"))
     require(
         db.scalar(select(Organization.id)) is None, 409, "setup_closed", "Setup is already complete"
     )
-    path = get_settings().bootstrap_token_file
-    require(
-        path is not None and path.is_file(),
-        503,
-        "setup_unavailable",
-        "Setup token is not configured",
-    )
-    assert path is not None
-    import hmac
+    if get_settings().setup_token_required:
+        path = get_settings().bootstrap_token_file
+        require(
+            path is not None and path.is_file(),
+            503,
+            "setup_unavailable",
+            "Setup token is not configured",
+        )
+        assert path is not None
+        import hmac
 
-    require(
-        hmac.compare_digest(token, path.read_text().strip()),
-        403,
-        "invalid_setup_token",
-        "Invalid setup token",
-    )
+        require(
+            token is not None and hmac.compare_digest(token, path.read_text().strip()),
+            403,
+            "invalid_setup_token",
+            "Invalid setup token",
+        )
     org = Organization(name=organization)
     db.add(org)
     db.flush()

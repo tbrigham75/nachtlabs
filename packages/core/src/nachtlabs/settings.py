@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     git_provider_network_enabled: bool = False
     integration_ca_file: Path | None = None
     bootstrap_token_file: Path | None = None
+    # First-account creation is open by default so a fresh installation can be
+    # used immediately. Set this on an installation reachable from an untrusted
+    # network to require the one-time token instead.
+    setup_token_required: bool = False
     session_idle_seconds: int = Field(default=1800, ge=60, le=86400)
     session_absolute_seconds: int = Field(default=43200, ge=300, le=604800)
     smtp_host: str | None = None

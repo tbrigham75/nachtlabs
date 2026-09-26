@@ -1,6 +1,15 @@
-.PHONY: setup dev build test test-integration test-e2e lint typecheck format format-check migrate migration-check api-client api-client-check secret-scan dependency-audit seed backup restore install-systemd healthcheck logs
+.PHONY: setup configure recover-owner dev build test test-integration test-e2e lint typecheck format format-check migrate migration-check api-client api-client-check secret-scan dependency-audit seed backup restore install-systemd healthcheck logs
 setup:
 	bash scripts/setup.sh
+configure:
+	@printf '%s\n' 'Creates /etc/nachtlabs credentials and service env files. Run as root, once, after install-systemd.sh.'
+	@printf '%s\n' '  sudo python3 scripts/configure.py --origin https://your-host [--development]'
+recover-owner:
+	@printf '%s\n' 'Break-glass Owner recovery. Requires root and migration credentials.'
+	@printf '%s\n' '  Reset a forgotten Owner password:'
+	@printf '%s\n' '    sudo python3 scripts/recover-owner.py --email you@example.com --reason "why" --reset-password'
+	@printf '%s\n' '  Create the very first Owner when none exists (e.g. the setup token is lost):'
+	@printf '%s\n' '    sudo python3 scripts/recover-owner.py --bootstrap --email you@example.com --reason "why"'
 dev:
 	bash scripts/dev.sh
 build:

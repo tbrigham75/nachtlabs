@@ -70,7 +70,7 @@ def setup(body: Setup, request: Request, response: Response, db: DB) -> dict[str
     user = bootstrap(
         db,
         context(request),
-        body.bootstrap_token.get_secret_value(),
+        body.bootstrap_token.get_secret_value() if body.bootstrap_token else None,
         str(body.email),
         body.name,
         body.password.get_secret_value(),
@@ -331,7 +331,8 @@ def forgot(body: EmailInput, request: Request, db: DB) -> dict[str, str]:
         bool(get_settings().smtp_host),
         503,
         "email_unconfigured",
-        "Email delivery is not configured",
+        "Email delivery is not configured; recover the Owner with "
+        "scripts/recover-owner.py --reset-password on the host console",
     )
     user = db.scalar(
         select(User).where(User.email == str(body.email).lower(), User.active.is_(True))

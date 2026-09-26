@@ -4,9 +4,13 @@ Current state: **NOT RUN**. Target Ubuntu 24.04, Python 3.12, Node 24, pnpm 10, 
 ## 1. Preserve and prepare
 Keep this source snapshot and its documents together. No commit is required or authorized. Follow linux-development.md and linux-systemd-deployment.md for native prerequisites and TLS. On the Linux host, generate real dependency lockfiles with the documented setup command. Do not install or start the executor yet.
 
-Review the new bootstrap role nachtlabs_executor, set its password locally, and provision executor-db/executor.env with root-only permissions. Fresh configure.py creates these files; on an existing M4 installation, create only the new files manually rather than rerunning configure.py over existing credentials. Preserve all existing keys and passwords.
+Review the new bootstrap role nachtlabs_executor, set its password locally, and provision executor-db/executor.env with root-only permissions. Fresh configure.py creates these files; on an existing M4 installation, create only the new files manually rather than rerunning configure.py over existing credentials. Preserve all existing keys and passwords. Run it as `sudo python3 scripts/configure.py --origin https://your-host`; `make configure` prints the exact invocation. It refuses to overwrite existing credentials.
 
 Set both network switches false initially. Supply production HTTPS origin, allowed hosts, database credential file paths, master key/ID, SMTP values where desired, and the separate *_test database credentials. Never put live credentials into the repository.
+
+### First account
+Start API, worker and web, open the origin, and complete Owner setup when prompted. The interface checks `/auth/setup-status` and offers setup instead of a sign-in form whenever no account exists; if the API cannot be reached it says so rather than showing a form that cannot work. No setup token is required by default, so do this step while the reverse proxy is still closed to untrusted clients. On an untrusted network, set `NACHTLABS_SETUP_TOKEN_REQUIRED=true` first and use the token that configure.py wrote to `credentials/bootstrap-token`. Setup closes after the first account, permanently. `make recover-owner` prints recovery commands for a lost Owner password and for bootstrapping the first Owner offline.
+
 
 ## 2. Foundation and source checks
 On Linux, in the documented environment, run:

@@ -28,8 +28,25 @@ apps/web: interface. apps/api: HTTP boundary and migrations. apps/worker: mail, 
 packages/core: policy, identity, adapters, workflow/evidence and Linux executor. packages/api-client: authored browser transport/types.
 scripts, systemd, config: native operations. demo: disposable credential-free examples. tests and colocated tests: future operator-run checks.
 
+## First run
+Open the configured origin in a browser. The interface checks whether an account exists and, if
+none does, offers Owner setup instead of a sign-in form. Enter an organization name, name, email
+and a password of at least 12 characters; that account becomes the Owner, and setup then closes
+permanently, so a second account cannot be created this way. Later accounts are added by the Owner
+under Settings or Invitations.
+
+`POST /auth/setup` is intentionally reachable without a secret while uninitialized, so a fresh
+installation is usable immediately. On a host reachable from an untrusted network, set
+`NACHTLABS_SETUP_TOKEN_REQUIRED=true` and configure `NACHTLABS_BOOTSTRAP_TOKEN_FILE`; setup will
+then also require that one-time token. Until the Owner exists, keep the reverse proxy closed to
+untrusted clients.
+
+If the Owner password is lost and email is not configured, recover it on the host console with
+`make recover-owner`. If no account exists at all, the same command with `--bootstrap` creates the
+first one.
+
 ## Operator commands
-make setup, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
+make setup, make configure, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
 
 Follow handoff ordering. Generate actual lockfiles and OpenAPI/TypeScript declarations on Linux; none were fabricated. The source-only review is recorded in docs/planning/source-review-m10.md.
 

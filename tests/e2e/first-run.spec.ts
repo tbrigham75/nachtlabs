@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 // First-run routing only. /auth/setup-status is mocked because a real
-// uninitialized installation needs its own database and bootstrap token.
+// uninitialized installation needs its own database.
 const id = "00000000-0000-4000-8000-000000000002";
 
 async function mock(
@@ -16,11 +16,7 @@ async function mock(
         contentType: "text/event-stream",
         body: ": heartbeat\n\n",
       });
-    const data = path.endsWith("/auth/me")
-      ? { status: 401 }
-      : path.endsWith("/auth/setup-status")
-        ? { initialized }
-        : {};
+    const data = path.endsWith("/auth/setup-status") ? { initialized } : {};
     if (path.endsWith("/auth/me"))
       return route.fulfill({
         status: 401,
@@ -35,6 +31,17 @@ async function mock(
       body: JSON.stringify(data),
     });
   });
+}
+
+// The API being unreachable must never be mistaken for "no account exists".
+async function mockApiDown(page: import("@playwright/test").Page) {
+  await page.route("**/api/v1/**", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "text/plain",
+      body: "unavailable",
+    }),
+  );
 }
 
 test.describe("first-run discovery", () => {
@@ -55,7 +62,9 @@ test.describe("first-run discovery", () => {
       page.getByRole("button", { name: "Create Owner account" }),
     ).toBeVisible();
     // The form offered must be setup, not a sign-in form nobody can satisfy.
-    await expect(page.getByLabel(/One-time setup token/)).toBeVisible();
+    await expect(page.getByLabel(/Organization name/)).toBeVisible();
+    // No secret the operator has never been told about may be demanded.
+    await expect(page.getByLabel(/setup token/i)).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Sign in" })).toHaveCount(0);
   });
 
@@ -127,6 +136,41 @@ test.describe("first-run discovery", () => {
     await expect(page).toHaveURL(/\/overview$/);
     await expect(
       page.getByRole("heading", { name: "Engineering overview" }),
+    ).toBeVisible();
+  });
+
+  test("an unreachable API is reported, never mistaken for a sign-in prompt", async ({
+    page,
+  }) => {
+    // Regression: setup-status failing used to leave the operator on a plain
+    // "Welcome back" form, indistinguishable from "no account exists".
+    await mockApiDown(page);
+    for (const path of ["/", "/login", "/setup"]) {
+      await page.goto(path);
+      await expect(
+        page.getByRole("heading", { name: "NachtLabs is not reachable" }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+      // A sign-in form that cannot work must not be offered.
+      await expect(page.getByLabel(/^Email address/)).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "Create Owner account" }),
+      ).toHaveCount(0);
+    }
+  });
+
+  test("the retry button re-reads setup status", async ({ page }) => {
+    await mockApiDown(page);
+    await page.goto("/login");
+    await expect(
+      page.getByRole("heading", { name: "NachtLabs is not reachable" }),
+    ).toBeVisible();
+    // Now let setup-status through; the page must recover to the right state.
+    await page.unroute("**/api/v1/**");
+    await mock(page, true);
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
   });
 });

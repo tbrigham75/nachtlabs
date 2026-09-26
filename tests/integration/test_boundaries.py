@@ -136,3 +136,55 @@ def test_request_errors_do_not_echo_password(owner: TestClient) -> None:
 
 def test_unknown_project_is_not_visible(owner: TestClient) -> None:
     assert owner.get(f"/api/v1/projects/{uuid4()}").status_code == 404
+
+
+def test_first_account_needs_no_token(client: TestClient) -> None:
+    """A fresh installation must be usable without a secret nobody has been told about."""
+    payload = {
+        "name": "Owner",
+        "organization": "Tokenless",
+        "email": "owner@example.com",
+        "password": new_token(),
+    }
+    created = client.post("/api/v1/auth/setup", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["role"] == "owner"
+    # Setup must still close permanently behind the first account.
+    assert (
+        client.post(
+            "/api/v1/auth/setup", json={**payload, "email": "second@example.com"}
+        ).status_code
+        == 409
+    )
+
+
+def test_setup_token_is_enforced_when_required(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NACHTLABS_SETUP_TOKEN_REQUIRED", "true")
+    get_settings.cache_clear()
+    payload = {
+        "name": "Owner",
+        "organization": "Guarded",
+        "email": "owner@example.com",
+        "password": new_token(),
+    }
+    try:
+        missing = client.post("/api/v1/auth/setup", json=payload)
+        assert missing.status_code == 403
+        assert missing.json()["error"]["code"] == "invalid_setup_token"
+        wrong = client.post(
+            "/api/v1/auth/setup", json={**payload, "bootstrap_token": "not-the-token"}
+        )
+        assert wrong.status_code == 403
+        accepted = client.post(
+            "/api/v1/auth/setup",
+            json={
+                **payload,
+                "bootstrap_token": get_settings().bootstrap_token_file.read_text(),
+            },
+        )
+        assert accepted.status_code == 201, accepted.text
+    finally:
+        monkeypatch.undo()
+        get_settings.cache_clear()

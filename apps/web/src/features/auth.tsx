@@ -7,14 +7,40 @@ import { Moon } from "lucide-react";
 import { write } from "@nachtlabs/api-client";
 import { Form, type Field } from "@/components/ui";
 
+export function ApiUnreachable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="notice" role="alert">
+      <p>
+        <strong>NachtLabs cannot reach its own API.</strong>
+      </p>
+      <p>
+        Setup status could not be read, so this page cannot tell whether an
+        account exists yet. It will not offer a sign-in form that might not
+        work.
+      </p>
+      <p>
+        Check that the API service is running and that the reverse proxy
+        forwards <code>/api/</code> to it, then try again.
+      </p>
+      <button className="primary" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export function AuthScreen({
   path,
   initialized,
   checkingSetup,
+  setupUnreachable,
+  retrySetup,
 }: {
   path: string;
   initialized?: boolean;
   checkingSetup: boolean;
+  setupUnreachable: boolean;
+  retrySetup: () => void;
 }) {
   const router = useRouter();
   const client = useQueryClient();
@@ -40,19 +66,21 @@ export function AuthScreen({
   // in to. Offer Owner setup instead of a form that cannot succeed.
   const firstRun = initialized === false;
   const setupClosed = initialized === true && setup;
-  const title = firstRun
-    ? "Welcome to NachtLabs"
-    : challenge
-      ? "Verify your identity"
-      : setup
-        ? "Initialize NachtLabs"
-        : forgot
-          ? "Reset your password"
-          : invitation
-            ? "Accept your invitation"
-            : login
-              ? "Welcome back"
-              : "Choose a new password";
+  const title = setupUnreachable
+    ? "NachtLabs is not reachable"
+    : firstRun
+      ? "Welcome to NachtLabs"
+      : challenge
+        ? "Verify your identity"
+        : setup
+          ? "Initialize NachtLabs"
+          : forgot
+            ? "Reset your password"
+            : invitation
+              ? "Accept your invitation"
+              : login
+                ? "Welcome back"
+                : "Choose a new password";
   const fields: Field[] = challenge
     ? [
         {
@@ -83,13 +111,7 @@ export function AuthScreen({
             required: true,
             min: 12,
             max: 128,
-          },
-          {
-            name: "bootstrap_token",
-            label: "One-time setup token",
-            type: "password",
-            required: true,
-            help: "Read from the protected token file created by your Linux administrator.",
+            help: "This account becomes the Owner. At least 12 characters.",
           },
         ]
       : login || forgot
@@ -166,104 +188,110 @@ export function AuthScreen({
       </section>
       <main className="auth">
         <h1>{title}</h1>
-        <p>
-          {firstRun
-            ? "No account exists on this installation yet. Create the first one; it becomes the Owner and setup then closes."
-            : setup
-              ? "The first account becomes the Owner. Public setup closes after initialization."
-              : setupClosed
-                ? "This installation is already initialized. Sign in, or use a password reset link."
-                : "Your organization’s engineering control plane."}
-        </p>
-        {firstRun && !setup ? (
-          <div className="notice" role="status">
-            <p>
-              {checkingSetup
-                ? "Checking whether this installation has been initialized…"
-                : "Owner setup is required before anyone can sign in."}
-            </p>
-            {setup ? null : (
-              <Link className="button primary" href="/setup">
-                Create the Owner account
-              </Link>
-            )}
-          </div>
-        ) : setupClosed ? (
-          <div className="notice" role="status">
-            <p>Setup has already been completed on this installation.</p>
-            <Link className="button primary" href="/login">
-              Sign in
-            </Link>
-          </div>
-        ) : message ? (
-          <div className="notice success" role="status">
-            {message}
-          </div>
-        ) : path === "/mfa/verify" ? (
-          <p className="notice">
-            Start a fresh sign-in to receive a verification challenge.
-          </p>
+        {setupUnreachable ? (
+          <ApiUnreachable onRetry={retrySetup} />
         ) : (
-          <Form
-            key={`${path}-${Boolean(challenge)}-${Boolean(token)}`}
-            fields={fields}
-            label={
-              challenge
-                ? "Verify"
+          <>
+            <p>
+              {firstRun
+                ? "No account exists on this installation yet. Create the first one; it becomes the Owner and setup then closes."
                 : setup
-                  ? "Create Owner account"
-                  : login
-                    ? "Sign in"
-                    : forgot
-                      ? "Send reset link"
-                      : "Save password"
-            }
-            submit={async (values) => {
-              if (challenge) {
-                await write("/auth/mfa/verify", {
-                  challenge,
-                  code: values.code,
-                });
-                setChallenge(undefined);
-                await signedIn();
-              } else if (setup) {
-                await write("/auth/setup", values);
-                await signedIn();
-              } else if (login) {
-                const result = await write<{
-                  mfa_required: boolean;
-                  challenge?: string;
-                }>("/auth/login", values);
-                if (result.mfa_required) setChallenge(result.challenge);
-                else await signedIn();
-              } else if (forgot) {
-                const result = await write<{ message: string }>(
-                  "/auth/forgot-password",
-                  values,
-                );
-                setMessage(result.message);
-              } else {
-                await write(
-                  invitation
-                    ? "/auth/accept-invitation"
-                    : "/auth/reset-password",
-                  { ...values, token: token || values.token },
-                );
-                setToken("");
-                setMessage("Password saved. You can now sign in.");
-              }
-            }}
-          />
+                  ? "The first account becomes the Owner. Public setup closes after initialization."
+                  : setupClosed
+                    ? "This installation is already initialized. Sign in, or use a password reset link."
+                    : "Your organization’s engineering control plane."}
+            </p>
+            {firstRun && !setup ? (
+              <div className="notice" role="status">
+                <p>
+                  {checkingSetup
+                    ? "Checking whether this installation has been initialized…"
+                    : "Owner setup is required before anyone can sign in."}
+                </p>
+                <Link className="button primary" href="/setup">
+                  Create the Owner account
+                </Link>
+              </div>
+            ) : setupClosed ? (
+              <div className="notice" role="status">
+                <p>Setup has already been completed on this installation.</p>
+                <Link className="button primary" href="/login">
+                  Sign in
+                </Link>
+              </div>
+            ) : message ? (
+              <div className="notice success" role="status">
+                {message}
+              </div>
+            ) : path === "/mfa/verify" ? (
+              <p className="notice">
+                Start a fresh sign-in to receive a verification challenge.
+              </p>
+            ) : (
+              <Form
+                key={`${path}-${Boolean(challenge)}-${Boolean(token)}`}
+                fields={fields}
+                label={
+                  challenge
+                    ? "Verify"
+                    : setup
+                      ? "Create Owner account"
+                      : login
+                        ? "Sign in"
+                        : forgot
+                          ? "Send reset link"
+                          : "Save password"
+                }
+                submit={async (values) => {
+                  if (challenge) {
+                    await write("/auth/mfa/verify", {
+                      challenge,
+                      code: values.code,
+                    });
+                    setChallenge(undefined);
+                    await signedIn();
+                  } else if (setup) {
+                    await write("/auth/setup", values);
+                    await signedIn();
+                  } else if (login) {
+                    const result = await write<{
+                      mfa_required: boolean;
+                      challenge?: string;
+                    }>("/auth/login", values);
+                    if (result.mfa_required) setChallenge(result.challenge);
+                    else await signedIn();
+                  } else if (forgot) {
+                    const result = await write<{ message: string }>(
+                      "/auth/forgot-password",
+                      values,
+                    );
+                    setMessage(result.message);
+                  } else {
+                    await write(
+                      invitation
+                        ? "/auth/accept-invitation"
+                        : "/auth/reset-password",
+                      { ...values, token: token || values.token },
+                    );
+                    setToken("");
+                    setMessage("Password saved. You can now sign in.");
+                  }
+                }}
+              />
+            )}
+            <div className="auth-links">
+              {firstRun || setupClosed ? null : (
+                <Link href="/login">Sign in</Link>
+              )}
+              {firstRun || setupClosed || login ? null : (
+                <Link href="/forgot-password">Forgot password?</Link>
+              )}
+            </div>
+            <small style={{ marginTop: 24 }}>
+              Credentials remain on this installation. No public registration.
+            </small>
+          </>
         )}
-        <div className="auth-links">
-          {firstRun || setupClosed ? null : <Link href="/login">Sign in</Link>}
-          {firstRun || setupClosed || login ? null : (
-            <Link href="/forgot-password">Forgot password?</Link>
-          )}
-        </div>
-        <small style={{ marginTop: 24 }}>
-          Credentials remain on this installation. No public registration.
-        </small>
       </main>
     </div>
   );

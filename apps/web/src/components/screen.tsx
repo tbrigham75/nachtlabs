@@ -40,14 +40,20 @@ export function Screen() {
   });
   // An installation with no account yet has to offer Owner setup before it can
   // offer sign-in, otherwise a first-time operator is asked to log in to an
-  // installation nobody has registered on.
+  // installation nobody has registered on. This is also the only way the
+  // interface can tell "no account exists" from "the API is unreachable" -- if
+  // setup-status cannot be read we must say so rather than quietly showing a
+  // sign-in form that cannot work.
   const setup = useQuery({
     queryKey: ["setup-status"],
     queryFn: () => api<{ initialized: boolean }>("/auth/setup-status"),
     enabled: publicPage || me.isError,
     staleTime: 30_000,
+    retry: 1,
+    refetchOnWindowFocus: true,
   });
   const initialized = setup.data?.initialized;
+  const setupUnreachable = setup.isError;
   const signedOut =
     me.isError && me.error instanceof ApiError && me.error.status === 401;
   useEffect(() => {
@@ -67,9 +73,24 @@ export function Screen() {
         path={path}
         initialized={initialized}
         checkingSetup={setup.isPending}
+        setupUnreachable={setupUnreachable}
+        retrySetup={() => void setup.refetch()}
       />
     );
   if (me.isPending) return <Loading />;
+  // With the API unreachable the operator must be told that, not shown a bare
+  // error box for a sign-in they cannot complete.
+  if (setupUnreachable && !me.data)
+    return (
+      <AuthScreen
+        key="unreachable"
+        path="/login"
+        initialized={undefined}
+        checkingSetup={false}
+        setupUnreachable
+        retrySetup={() => void setup.refetch()}
+      />
+    );
   if (me.error) return <ErrorNotice error={me.error} />;
   if (!me.data) return null;
   const user = me.data;

@@ -73,7 +73,10 @@ fi
 api_url="${api_url:-http://127.0.0.1:8000}"
 printf '  api url : %s\n' "$api_url"
 
-status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$api_url/api/v1/health/ready" 2>/dev/null || echo 000)"
+# curl prints its own 000 on a connection failure, so appending a fallback would
+# report "000000" and defeat the match below.
+status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$api_url/api/v1/health/ready" 2>/dev/null)" || true
+status="${status:-000}"
 if [[ "$status" == "200" ]]; then
   ok "health/ready returned 200"
 else

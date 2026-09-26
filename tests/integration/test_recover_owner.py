@@ -6,7 +6,9 @@ actually matters. ``client`` is requested only for its truncation, so each test
 starts from the empty disposable database.
 """
 
+import contextlib
 import importlib.util
+import io
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -29,6 +31,15 @@ def load() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextlib.contextmanager
+def patch_output(sink: list[str]):
+    """Capture stdout so assertions can read what the operator is shown."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        yield
+    sink.append(buffer.getvalue())
 
 
 def run(
@@ -140,3 +151,89 @@ def test_recovery_resets_a_lost_owner_password(
     user = only_user()
     assert password_matches(user.password_hash, replacement)
     assert audit_actions("identity.owner.recovered") == 1
+
+
+def test_list_accounts_is_read_only_and_reports_the_owner(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without this, an operator who has lost the Owner email has no route in.
+
+    --email is mandatory for recovery and the interface will not disclose account
+    addresses to an anonymous visitor, so without --list the host console was the
+    only remaining option.
+    """
+    module = load()
+    run(
+        module,
+        monkeypatch,
+        ["--bootstrap", "--email", "owner@example.com", "--reason", "initial"],
+        new_token(),
+    )
+    with session() as db:
+        assert db.scalar(select(func.count()).select_from(User)) == 1
+
+    seen: list[str] = []
+
+    def fake_getpass(prompt: str = "") -> str:
+        raise AssertionError("--list must not prompt for a password")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("os.geteuid", lambda: 0)
+        patch.setattr("getpass.getpass", fake_getpass)
+        patch.setattr(
+            "builtins.input",
+            lambda _prompt: (_ for _ in ()).throw(AssertionError("--list must not prompt")),
+        )
+        patch.setattr(sys, "argv", ["recover-owner.py", "--list"])
+        with patch_output(seen):
+            assert module.main() == 0
+
+    text = "".join(seen)
+    assert "owner@example.com" in text
+    assert "owner" in text
+    assert "active" in text
+    # Read-only: the account is untouched and still usable.
+    with session() as db:
+        user = db.scalar(select(User).where(User.email == "owner@example.com"))
+        assert user is not None and user.active is True and user.role == "owner"
+    assert audit_actions("identity.owner.recovered") == 0
+    assert audit_actions("identity.owner.bootstrapped") == 1
+
+
+def test_list_accounts_reports_an_empty_installation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load()
+    seen: list[str] = []
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("os.geteuid", lambda: 0)
+        patch.setattr(sys, "argv", ["recover-owner.py", "--list"])
+        with patch_output(seen):
+            assert module.main() == 0
+    text = "".join(seen)
+    # Must be actionable rather than merely reporting nothing.
+    assert "not completed" in text
+    assert "--bootstrap" in text
+
+
+def test_email_is_required_unless_listing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("os.geteuid", lambda: 0)
+        patch.setattr(sys, "argv", ["recover-owner.py", "--reset-password"])
+        with pytest.raises(SystemExit) as caught:
+            module.main()
+    # argparse exits 2 on a usage error.
+    assert caught.value.code == 2
+    assert "--email is required" in capsys.readouterr().err
+
+
+def test_list_still_requires_root() -> None:
+    module = load()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("os.geteuid", lambda: 1000)
+        patch.setattr(sys, "argv", ["recover-owner.py", "--list"])
+        with pytest.raises(SystemExit, match="Root console"):
+            module.main()

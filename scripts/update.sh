@@ -36,6 +36,11 @@ if [[ "$have_systemd" -eq 0 ]]; then
   die "no systemd unit for nachtlabs-api.service was found; this target is for installed deployments, not a development checkout"
 fi
 
+# The services are stopped and the bundle rebuilt below, so prove the toolchain
+# can produce a replacement while the current one is still in place. A build
+# that cannot succeed must not begin by tearing down what already works.
+require_build_toolchain
+
 # An executor job mid-flight may be holding uncommitted candidate state.
 if [[ -S /var/run/nachtlabs-executor/broker.sock ]] || pgrep -f "nachtlabs.execution.broker" >/dev/null 2>&1; then
   die "an executor broker is running; stop and reconcile it before updating (see docs/operations/upgrade-and-recovery.md)"

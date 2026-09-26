@@ -11,11 +11,38 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 FORCE=0
 [[ "${1:-}" == "--force" ]] && FORCE=1
 UNITS=(nachtlabs-api nachtlabs-worker nachtlabs-web)
-PGHOST=127.0.0.1
-PGPORT=5432
+MIGRATION_ENV=/etc/nachtlabs/migration.env
 
 step() { printf '\n== %s ==\n' "$1"; }
 die()  { printf 'Refusing to continue: %s\n' "$1" >&2; exit 1; }
+
+# One database path only. The venv interpreter ships psycopg because the
+# application needs it, so there is nothing to detect and no second code path to
+# get wrong. An earlier version branched on psql and could silently produce
+# empty row counts.
+psql_query() {
+  "$ROOT_PYTHON" - "$CRED_URL" "$1" <<'PYTHON'
+import sys
+import psycopg
+with psycopg.connect(sys.argv[1].replace("postgresql+psycopg://", "postgresql://")) as db:
+    print(db.execute(sys.argv[2]).fetchone()[0])
+PYTHON
+}
+
+psql_exec() {
+  "$ROOT_PYTHON" - "$CRED_URL" <<'PYTHON'
+import sys
+import psycopg
+with psycopg.connect(
+    sys.argv[1].replace("postgresql+psycopg://", "postgresql://"), autocommit=True
+) as db:
+    db.execute("DROP SCHEMA public CASCADE")
+    db.execute("CREATE SCHEMA public")
+print("  schema emptied")
+PYTHON
+}
+
+# --- preflight, all of it before anything is touched -----------------------
 
 step "Preflight"
 [[ "$NACHTLABS_ROOT" == "/opt/nachtlabs" ]] || die "this target resets an installed deployment at /opt/nachtlabs, not '$NACHTLABS_ROOT'"
@@ -27,48 +54,28 @@ step "Preflight"
 command -v systemctl >/dev/null || die "systemctl not found; this is an installed deployment only"
 systemctl list-unit-files nachtlabs-api.service >/dev/null 2>&1 || die "no nachtlabs-api.service unit found"
 
-# The migrator owns the schema, so reuse its credential rather than inventing one.
-MIGRATION_ENV=/etc/nachtlabs/migration.env
+ROOT_PYTHON="$NACHTLABS_ROOT/.venv/bin/python"
+[[ -x "$ROOT_PYTHON" ]] || die "no interpreter at $ROOT_PYTHON; run make setup first"
+# Prove the rebuild can succeed before we delete the bundle it will replace.
+require_build_toolchain
+
 [[ -r "$MIGRATION_ENV" ]] || die "cannot read $MIGRATION_ENV; run as an account that can read it"
 # shellcheck disable=SC1090
 set -a; source "$MIGRATION_ENV"; set +a
 CRED="${NACHTLABS_MIGRATION_DATABASE_URL_FILE:-}"
 [[ -r "$CRED" ]] || die "migration credential file '$CRED' is not readable"
-URL="$(cat "$CRED")"
-
-PSQL=(/usr/bin/psql -v ON_ERROR_STOP=1 -q)
-# psycopg is always present; use it when psql is not installed.
-if ! command -v /usr/bin/psql >/dev/null 2>&1 && ! command -v psql >/dev/null 2>&1; then
-  PY=1
-else
-  PY=0
-  command -v psql >/dev/null 2>&1 || PSQL=()
-fi
-
-count() {
-  local sql="$1"
-  if [[ "${PY:-0}" == "1" ]]; then
-    "$ROOT/.venv/bin/python" - "$URL" "$sql" <<'PY'
-import sys
-import psycopg
-with psycopg.connect(sys.argv[1].replace("postgresql+psycopg://", "postgresql://")) as db:
-    print(db.execute(sys.argv[2]).fetchone()[0])
-PY
-  else
-    "${PSQL[@]}" "$URL" -tAc "$sql"
-  fi
-}
+CRED_URL="$(cat "$CRED")"
 
 step "What is currently stored"
 # Every one of these is destroyed below.
-ORG=$(count "SELECT count(*) FROM organizations" 2>/dev/null || echo 0)
-USERS=$(count "SELECT count(*) FROM users" 2>/dev/null || echo 0)
-RUNS=$(count "SELECT count(*) FROM runs" 2>/dev/null || echo 0)
-EVID=$(count "SELECT count(*) FROM run_evidence" 2>/dev/null || echo 0)
-AUDIT=$(count "SELECT count(*) FROM audit_events" 2>/dev/null || echo 0)
-INVITES=$(count "SELECT count(*) FROM identity_tokens" 2>/dev/null || echo 0)
-INTEG=$(count "SELECT count(*) FROM integration_connections" 2>/dev/null || echo 0)
-printf '  organizations        : %s\n  users                : %s\n  runs                 : %s\n  run evidence          : %s\n  audit events          : %s\n  identity tokens       : %s\n  integration connections: %s\n' \
+ORG=$(psql_query "SELECT count(*) FROM organizations" 2>/dev/null || echo 0)
+USERS=$(psql_query "SELECT count(*) FROM users" 2>/dev/null || echo 0)
+RUNS=$(psql_query "SELECT count(*) FROM runs" 2>/dev/null || echo 0)
+EVID=$(psql_query "SELECT count(*) FROM run_evidence" 2>/dev/null || echo 0)
+AUDIT=$(psql_query "SELECT count(*) FROM audit_events" 2>/dev/null || echo 0)
+INVITES=$(psql_query "SELECT count(*) FROM identity_tokens" 2>/dev/null || echo 0)
+INTEG=$(psql_query "SELECT count(*) FROM integration_connections" 2>/dev/null || echo 0)
+printf '  organizations         : %s\n  users                 : %s\n  runs                  : %s\n  run evidence           : %s\n  audit events           : %s\n  identity tokens        : %s\n  integration connections: %s\n' \
   "$ORG" "$USERS" "$RUNS" "$EVID" "$AUDIT" "$INVITES" "$INTEG"
 
 if [[ "$FORCE" -eq 0 && ( "$RUNS" != "0" || "$EVID" != "0" || "$INTEG" != "0" || "$AUDIT" -gt 2 ) ]]; then
@@ -83,6 +90,8 @@ printf '\nType RESET to continue: '
 read -r reply
 [[ "$reply" == "RESET" ]] || die "cancelled"
 
+# --- destructive, everything below this point is expected to change state ---
+
 step "Stopping services"
 systemctl stop "${UNITS[@]}" 2>/dev/null || true
 if systemctl is-active --quiet nachtlabs-executor 2>/dev/null; then
@@ -91,23 +100,11 @@ fi
 sleep 1
 
 step "Emptying the database"
-if [[ "${PY:-0}" == "1" ]]; then
-  "$ROOT/.venv/bin/python" - "$URL" <<'PY'
-import sys
-import psycopg
-with psycopg.connect(sys.argv[1].replace("postgresql+psycopg://", "postgresql://"), autocommit=True) as db:
-    db.execute("DROP SCHEMA public CASCADE")
-    db.execute("CREATE SCHEMA public")
-print("  schema emptied")
-PY
-else
-  "${PSQL[@]}" "$URL" -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public'
-  printf '  schema emptied\n'
-fi
+psql_exec
 
 step "Re-applying migrations"
 uv run --no-sync alembic -c apps/api/alembic.ini upgrade head >/dev/null
-printf '  schema at %s\n' "$(count "SELECT version_num FROM alembic_version")"
+printf '  schema at %s\n' "$(psql_query "SELECT version_num FROM alembic_version")"
 
 step "Discarding the web build"
 # Removing .next guarantees nothing stale can be served, which is the single

@@ -18,11 +18,60 @@ from nachtlabs.security import hasher
 from sqlalchemy import delete, select, text
 
 
-def main() -> None:
+def list_owners() -> int:
+    """Report the organization and its accounts. Reads nothing, writes nothing.
+
+    Without this, an operator who has lost the Owner email has no supported way
+    in: --email is mandatory for recovery, and the interface deliberately will
+    not disclose account addresses to an anonymous visitor. That combination
+    left the host console as the only option. This is root-gated and mutates
+    nothing, so it removes the need for hand-written SQL.
+    """
+    with session() as db:
+        orgs = list(db.execute(select(Organization.id, Organization.name)))
+        if not orgs:
+            print("No organization exists. This installation has not completed")
+            print("first-time setup, so an Owner can be created without a reset:")
+            print(
+                '  sudo python3 scripts/recover-owner.py --bootstrap --email you@example.com --reason "first owner"'
+            )
+            return 0
+        for org_id, name in orgs:
+            print(f"organization: {name}")
+            users = list(
+                db.execute(
+                    select(User.email, User.role, User.active, User.mfa_secret.is_not(None))
+                    .where(User.org_id == org_id)
+                    .order_by(User.created_at)
+                )
+            )
+            if not users:
+                print("  (no accounts)")
+            for email, role, active, has_mfa in users:
+                state = "active" if active else "INACTIVE"
+                mfa = ", mfa enrolled" if has_mfa else ""
+                print(f"  {role:11} {email}  [{state}{mfa}]")
+    print("")
+    print("To regain access as the operator, reset that account's password:")
+    print(
+        '  sudo python3 scripts/recover-owner.py --email <address> --reason "why" --reset-password'
+    )
+    print("To discard everything and start from zero instead:")
+    print("  sudo make reset-first-run")
+    return 0
+
+
+def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--email", required=True)
-    parser.add_argument("--reason", required=True)
+    parser.add_argument("--email")
+    parser.add_argument("--reason")
     parser.add_argument("--reset-password", action="store_true")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        dest="list_accounts",
+        help="Show the organization and its accounts, then exit. Changes nothing.",
+    )
     parser.add_argument(
         "--bootstrap",
         action="store_true",
@@ -33,6 +82,12 @@ def main() -> None:
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("Root console access is required")
+    if args.list_accounts:
+        return list_owners()
+    if not args.email:
+        parser.error("--email is required (or use --list to see the accounts)")
+    if not args.reason:
+        parser.error("--reason is required for any change to an account")
     if input(f"Type {args.email} to confirm offline Owner recovery: ") != args.email:
         raise SystemExit("Recovery cancelled")
     password = None
@@ -76,7 +131,7 @@ def main() -> None:
                 f"First Owner bootstrapped for {user.email} in organization {org.name!r}. "
                 "Sign in and configure the installation; setup is now closed."
             )
-            return
+            return 0
         db.scalar(select(Organization).with_for_update())
         user = db.scalar(
             select(User)
@@ -106,7 +161,8 @@ def main() -> None:
     print(
         "Owner recovery recorded. Existing sessions revoked. Organization MFA policy remains in force; enroll again on next sign-in."
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

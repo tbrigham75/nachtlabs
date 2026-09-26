@@ -1,6 +1,28 @@
 # Upgrade, interruption and recovery
 Status: authored procedure; NOT RUN.
 
+## Lost Owner access
+First find out what exists. This is read-only and changes nothing:
+
+    sudo make recover-owner
+    sudo python3 scripts/recover-owner.py --list
+
+It prints the organization and every account with role and active state. This exists because
+`--email` is mandatory for any recovery and the interface deliberately will not disclose account
+addresses to an anonymous visitor, so an operator who had lost both the address and the password had
+no supported route in and the host console was the only option.
+
+Then either keep the installation and reset the credential:
+
+    sudo python3 scripts/recover-owner.py --email <address> --reason "why" --reset-password
+
+or start over with `make reset-first-run` below. Resetting a password is the better choice when the
+data matters: it revokes existing sessions, clears any MFA enrolment so you can enrol again, and
+records `identity.owner.recovered` in the audit trail.
+
+If no account exists at all, `--list` says so and points at `--bootstrap`, which creates the first
+Owner. It refuses when any account row already exists.
+
 ## Start over: reset to a pre-first-run state
 If an installation is in a state where the first-run page will not behave, discard everything and
 begin again:
@@ -8,15 +30,24 @@ begin again:
     sudo make reset-first-run
 
 This empties the database, re-applies migrations, deletes the web build, rebuilds, and restarts, so
-the next page load must offer Owner setup. It refuses unless it is root, the tree is
-`/opt/nachtlabs`, and the working tree is clean; it prints the row counts it is about to destroy and
-requires you to type `RESET`; and it requires `--force` if anything beyond a first account exists —
-runs, evidence, integrations or audit history.
+the next page load must offer Owner setup.
+
+It checks everything before changing anything, and refuses unless it is root, the tree is
+`/opt/nachtlabs`, the working tree is clean, and a systemd unit is installed. It proves the **build
+toolchain** is present and correct first — Node 24, pnpm 10, uv — because the rebuild replaces the
+bundle it deletes, and a build that cannot succeed must not begin by tearing down what works. It
+prints the row counts it is about to destroy, requires you to type `RESET`, and requires `--force` if
+anything beyond a first account exists: runs, evidence, integrations or audit history.
 
 It does **not** touch `/etc/nachtlabs`. Credentials, the master key and every service env file are
 preserved, so `configure.py` does not need to run again and no secret is rotated. A reset is
 therefore a way to fix application state, not to recover a lost credential; for that use
 `make recover-owner`.
+
+Note that `organizations` has a `singleton` constraint, so an installation can only ever hold one
+organization. If setup reports that an account already exists, one does: both code paths that create
+an organization create its Owner in the same transaction, and no migration, seed or script inserts one
+on its own. `recover-owner.py --list` will show you which.
 
 Deleting `apps/web/.next` matters. A stale bundle is the most common reason a first-run page appears
 not to update, because `install-systemd.sh` does not build.

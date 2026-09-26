@@ -39,6 +39,11 @@ If you ever reach `/setup` on an installation that is already initialized, the p
 lists the ways forward: sign in, request a password reset, or recover as the operator on the host
 console. It never silently redirects you away and leaves you guessing.
 
+If you are locked out and do not know which account exists, `sudo python3 scripts/recover-owner.py
+--list` prints the organization and its accounts without changing anything, so you can then run
+`--reset-password` against the right address. It will not tell you who to contact over HTTP: account
+addresses are never disclosed to an anonymous visitor.
+
 `POST /auth/setup` is intentionally reachable without a secret while uninitialized, so a fresh
 installation is usable immediately. On a host reachable from an untrusted network, set
 `NACHTLABS_SETUP_TOKEN_REQUIRED=true` and configure `NACHTLABS_BOOTSTRAP_TOKEN_FILE`; setup will

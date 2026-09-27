@@ -32,6 +32,20 @@ def get_db() -> Generator[Session, None, None]:
 DB = Annotated[Session, Depends(get_db, scope="function")]
 
 
+def origin_permitted(request: Request) -> bool:
+    """Whether this request's Origin is one the operator configured.
+
+    Exact membership in settings.permitted_origins, never a wildcard or prefix
+    match, so every accepted origin is a decision someone wrote down. Shared by
+    the pre-authentication guard and the CSRF check so the two cannot drift, and
+    a request with no Origin header is never permitted: every browser sends one on
+    a cross-origin or non-GET request, and a mutating call without it is not one
+    this installation should serve.
+    """
+    seen = request.headers.get("origin")
+    return seen is not None and seen in get_settings().permitted_origins
+
+
 def context(request: Request) -> AuditContext:
     return AuditContext(
         request.state.request_id, request.client.host if request.client else "unknown"
@@ -108,7 +122,7 @@ def principal(request: Request, db: DB) -> Principal:
     assert user is not None
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         require(
-            request.headers.get("origin") == get_settings().public_url,
+            origin_permitted(request),
             403,
             "csrf",
             "Request origin is not permitted",
@@ -160,7 +174,7 @@ def recent(actor: Principal) -> None:
 
 def browser_origin(request: Request) -> None:
     require(
-        request.headers.get("origin") == get_settings().public_url,
+        origin_permitted(request),
         403,
         "origin",
         "Request origin is not permitted",

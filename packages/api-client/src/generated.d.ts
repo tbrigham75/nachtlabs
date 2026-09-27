@@ -37,10 +37,16 @@ export interface paths {
      *     distinguish "origin refused" from "bad input" without creating an account.
      *     This answers it directly and mutates nothing.
      *
-     *     It reports the configured public URL so an operator can see the exact
-     *     mismatch rather than infer it. That is operator-facing configuration on a
-     *     single-tenant self-hosted console, comparable to what setup-status already
-     *     discloses, and it is not reachable to learn anything about accounts.
+     *     It reports the configured public URL and the full set of permitted origins so
+     *     an operator can see the exact mismatch rather than infer it. That is
+     *     operator-facing configuration on a single-tenant self-hosted console,
+     *     comparable to what setup-status already discloses, and it is not reachable to
+     *     learn anything about accounts.
+     *
+     *     origin_accepted is only meaningful when a request actually carries an Origin
+     *     header. A same-origin GET does not, so a browser reading this from its own
+     *     page always sees null here even on a healthy installation; callers must
+     *     compare the origin they know they are using against `allowed` instead.
      */
     get: operations["preflight_api_v1_auth_preflight_get"];
     put?: never;

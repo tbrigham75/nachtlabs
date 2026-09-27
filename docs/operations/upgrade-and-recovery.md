@@ -71,9 +71,43 @@ account is refused with `403 origin`. `browser_origin` requires the request `Ori
 `NACHTLABS_PUBLIC_URL` exactly, so `https://nachtlabs.example.com` configured against a browser on
 `https://www.nachtlabs.example.com` fails every write and no read.
 
-`make diagnose-setup` checks this. It calls `GET /auth/preflight`, a public, non-mutating endpoint
-that reports the origin it saw, the origin it expected, and whether they match, and it prints the
-exact fix. To reproduce a host mismatch deliberately:
+The interface now says so itself. A signed-in page whose address is not in the permitted set shows
+a persistent banner naming the address in use, every accepted origin, and the setting to change, and
+the setup wizard turns the refusal into the same advice instead of passing the bare message through.
+A form that renders and then refuses is still worth checking here, but it should now say why.
+
+## Answering on more than one address
+`NACHTLABS_PUBLIC_URL` is the canonical origin: it builds the links in reset and delivery email, and
+it is the one production mode requires to be HTTPS. Additional browser addresses go in
+`NACHTLABS_ALLOWED_ORIGINS` as a comma-separated list of full origins:
+
+    NACHTLABS_PUBLIC_URL=https://nacht.lan
+    NACHTLABS_ALLOWED_ORIGINS=https://lab.lan,https://nacht.lan:8443
+    NACHTLABS_ALLOWED_HOSTS=nacht.lan,lab.lan
+
+Three things are enforced at startup rather than discovered later as a puzzling failure:
+
+- every origin's hostname must also appear in `NACHTLABS_ALLOWED_HOSTS`, or the request passes the
+  origin check and is then rejected by the trusted-host middleware with an unexplained 400;
+- production requires every permitted origin to be HTTPS, not just the canonical one;
+- one hostname may not be permitted on two schemes at once. A `Secure` cookie set on 443 is never
+  sent on 80 while a non-`Secure` one is sent on both, so the pair behaves unpredictably. Use a
+  distinct hostname, or serve that host on HTTPS only.
+
+The list widens the set of addresses that work; it never opens it to others. Matching is exact and by
+membership, so a prefix or a lookalike host such as `https://nacht.lan.evil.example` does not
+satisfy it. If any permitted origin is plain HTTP, the session cookie is issued without the
+`Secure` attribute so that origin stays usable, and the interface says so; serve every permitted
+origin over HTTPS to get it back. Widening the list also widens who can reach an installation, so on
+one that is not yet initialized set `NACHTLABS_SETUP_TOKEN_REQUIRED=true` and restart before doing so,
+or anyone who can reach the new address can create the Owner account.
+
+`make diagnose-setup` reports the whole set and probes `/auth/preflight` once per permitted origin,
+so a wrong entry is caught from the host. It calls that public, non-mutating endpoint, which reports
+the origin it saw, the canonical origin, the full permitted list and whether they match. Note that
+`origin_accepted` there is only meaningful when the request actually carried an `Origin` header: a
+same-origin `GET` from a browser never does, so reading it from the interface's own page always shows
+`null` even on a healthy installation. To reproduce a host mismatch deliberately:
 
     NACHTLABS_DIAGNOSE_ORIGIN=https://www.example.com make diagnose-setup
 

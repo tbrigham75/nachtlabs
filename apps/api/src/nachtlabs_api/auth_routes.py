@@ -37,7 +37,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 def set_session(response: Response, pair: tuple[str, str]) -> None:
     settings = get_settings()
-    secure = settings.public_url.startswith("https://")
+    # Decided by the whole permitted set, not by the canonical origin alone: a
+    # Secure cookie is never sent over plain HTTP, so marking it while any
+    # permitted origin is HTTP would lock the operator out of that one.
+    secure = settings.secure_cookies
     response.set_cookie(
         "nachtlabs_session",
         pair[0],
@@ -72,23 +75,38 @@ def preflight(request: Request, db: DB) -> dict[str, Any]:
     distinguish "origin refused" from "bad input" without creating an account.
     This answers it directly and mutates nothing.
 
-    It reports the configured public URL so an operator can see the exact
-    mismatch rather than infer it. That is operator-facing configuration on a
-    single-tenant self-hosted console, comparable to what setup-status already
-    discloses, and it is not reachable to learn anything about accounts.
+    It reports the configured public URL and the full set of permitted origins so
+    an operator can see the exact mismatch rather than infer it. That is
+    operator-facing configuration on a single-tenant self-hosted console,
+    comparable to what setup-status already discloses, and it is not reachable to
+    learn anything about accounts.
+
+    origin_accepted is only meaningful when a request actually carries an Origin
+    header. A same-origin GET does not, so a browser reading this from its own
+    page always sees null here even on a healthy installation; callers must
+    compare the origin they know they are using against `allowed` instead.
     """
     settings = get_settings()
     seen = request.headers.get("origin")
-    accepted = seen == settings.public_url
+    permitted = list(settings.permitted_origins)
+    accepted = seen is not None and seen in permitted
     return {
         "origin": seen,
         "expected": settings.public_url,
+        # The full membership set, so a caller can tell a wrong address from a
+        # wrong configuration without a second request.
+        "allowed": permitted,
         "origin_accepted": accepted,
+        # False only when a permitted origin is plain HTTP, which means the
+        # session cookie cannot be marked Secure.
+        "secure_cookies": settings.secure_cookies,
         "setup_token_required": settings.setup_token_required,
         "initialized": db.scalar(select(Organization.id)) is not None,
         "hint": None
         if accepted or seen is None
-        else "NACHTLABS_PUBLIC_URL must match this browser's origin exactly",
+        else (
+            f"Add {seen} to NACHTLABS_ALLOWED_ORIGINS, or browse one of: " + ", ".join(permitted)
+        ),
     }
 
 

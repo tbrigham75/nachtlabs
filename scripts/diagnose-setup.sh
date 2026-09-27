@@ -122,10 +122,17 @@ if [[ -z "$public_url" ]]; then
   warn "set NACHTLABS_DIAGNOSE_ORIGIN=https://your-host to check by hand"
 else
   printf '  PUBLIC_URL : %s\n' "$public_url"
-  if [[ "$public_url" == https://* ]]; then
-    ok "PUBLIC_URL is https, so session cookies will be issued Secure"
-  else
-    warn "PUBLIC_URL is not https; session cookies will not be Secure"
+  # The canonical origin stays one value; NACHTLABS_ALLOWED_ORIGINS widens the
+  # set of addresses that work, and every entry is an operator decision.
+  extra_origins=""
+  for candidate in .env /etc/nachtlabs/api.env; do
+    if [[ -r "$candidate" ]]; then
+      extra_origins="$(sed -n 's/^NACHTLABS_ALLOWED_ORIGINS=//p' "$candidate" | tr -d "\"'\''" | tail -1)"
+      [[ -n "$extra_origins" ]] && break
+    fi
+  done
+  if [[ -n "$extra_origins" ]]; then
+    printf '  also permitted : %s\n' "$extra_origins"
   fi
   # Always reach the configured origin, but send whichever origin the browser
   # would send. Setting NACHTLABS_DIAGNOSE_ORIGIN to the address you actually
@@ -145,9 +152,9 @@ else
         ok "this origin is accepted, so creating the first account will work"
         ;;
       *'"origin_accepted":false'*)
-        bad "this origin is REFUSED, so every create/sign-in POST returns 403 origin"
-        bad "compare origin and expected above, correct NACHTLABS_PUBLIC_URL, then:"
-        bad "  sudo systemctl restart nachtlabs-api"
+        bad "this origin is REFUSED, so every create/sign-in POST is rejected"
+        bad "add it to NACHTLABS_ALLOWED_ORIGINS, and its host to NACHTLABS_ALLOWED_HOSTS, then:"
+        bad "  sudo systemctl restart nachtlabs-api nachtlabs-web"
         ;;
       *) warn "unrecognised preflight response" ;;
     esac
@@ -156,6 +163,33 @@ else
         warn "first-account creation also requires the one-time setup token"
         ;;
     esac
+    # Cookie security is decided by the whole set, not the canonical origin: a
+    # Secure cookie is never sent over plain HTTP, so one HTTP entry is enough to
+    # cost the attribute and must be reported as such.
+    case "$pre" in
+      *'"secure_cookies":true'*)
+        ok "every permitted origin is https, so the session cookie is issued Secure"
+        ;;
+      *'"secure_cookies":false'*)
+        warn "at least one permitted origin is plain http; the session cookie cannot be Secure"
+        warn "serve every permitted origin over https to restore it"
+        ;;
+    esac
+    # Probe every permitted origin, so a wrong entry is caught from the host
+    # rather than by an operator discovering it in a browser.
+    for probe_origin in $(printf '%s' "$pre" | sed -n 's/.*"allowed":\[\(.*\)\].*/\1/p' |
+      tr ',' '\n' | tr -d '[]" '); do
+      [[ -z "$probe_origin" ]] && continue
+      result="$(curl -s --max-time 8 -H "Origin: $probe_origin" \
+        "$probe_origin/api/v1/auth/preflight" 2>/dev/null || true)"
+      case "$result" in
+        *'"origin_accepted":true'*) ok "permitted origin answers: $probe_origin" ;;
+        *)
+          bad "permitted origin does NOT answer: $probe_origin"
+          bad "  it is not reachable, or a proxy is not forwarding /api/ for that host"
+          ;;
+      esac
+    done
   fi
 fi
 

@@ -474,3 +474,150 @@ test.describe("setup token", () => {
     await page.waitForURL("**/overview", { timeout: 15000 });
   });
 });
+
+test.describe("root path and unknown routes", () => {
+  // An authenticated operator typing the bare site address used to land on
+  // "Page not found" with no nav item highlighted and an empty breadcrumb,
+  // because no dispatch branch matches "/" when parts is empty. It went
+  // unnoticed while the only way to arrive was the post-sign-in redirect to
+  // /overview, so the bare origin was never visited with a session.
+  async function mockSignedIn(page: import("@playwright/test").Page) {
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/stream"))
+        return route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: ": heartbeat\n\n",
+        });
+      if (path.endsWith("/auth/me"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "00000000-0000-4000-8000-000000000002",
+            name: "Tom",
+            email: "owner@acme.example",
+            role: "owner",
+            active: true,
+            theme: "canvas",
+            version: 1,
+            mfa_required: false,
+          }),
+        });
+      if (path.endsWith("/auth/setup-status"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ initialized: true }),
+        });
+      if (path.endsWith("/projects"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: "[]",
+        });
+      if (path.endsWith("/llm-readiness"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            provider_network_enabled: false,
+            connection: null,
+            connection_count: 0,
+            discovery: { state: "not_run", models: [], checked_at: null },
+            implementation_profile: null,
+            verifier_profile: null,
+            planning_profile: null,
+            agent: null,
+            distinct_models: false,
+            execution_available: false,
+            complete: true,
+          }),
+        });
+      if (path.endsWith("/overview"))
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ worker: "online" }),
+        });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({}),
+      });
+    });
+  }
+
+  test("an authenticated operator at the site root reaches the overview", async ({
+    page,
+  }) => {
+    await mockSignedIn(page);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(
+      page.getByRole("heading", { name: "Engineering overview" }),
+    ).toBeVisible();
+    // The whole point of redirecting rather than rendering in place: the shell
+    // must look right, and it only does when the path is a real one.
+    await expect(page.locator("nav a.selected")).toHaveCount(1);
+    await expect(page.locator(".breadcrumb")).toContainText("overview");
+  });
+
+  test("the root redirect does not loop when the browser goes back", async ({
+    page,
+  }) => {
+    await mockSignedIn(page);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/overview$/);
+    // replace() is what makes this safe; going back must not return to "/".
+    await page.goBack();
+    await page.waitForTimeout(600);
+    expect(new URL(page.url()).pathname).not.toBe("/");
+  });
+
+  test("a signed-out visitor at the site root still reaches sign-in first", async ({
+    page,
+  }) => {
+    // Guards against the redirect hijacking anonymous visitors, and against it
+    // being placed ahead of the signed-out rule. Placing it earlier still ends
+    // up on /login, but only after bouncing through the private /overview, so
+    // the hop sequence is asserted rather than just the final address.
+    await mock(page, true);
+    const seen: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) seen.push(new URL(frame.url()).pathname);
+    });
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/login$/);
+    await page.waitForTimeout(600);
+    // What matters is that the private route is never rendered on the way, not
+    // the exact number of client-side commits that report the same address.
+    expect(seen).not.toContain("/overview");
+    expect(seen[seen.length - 1]).toBe("/login");
+    await expect(
+      page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+  });
+
+  test("an unknown address explains itself and offers a way back", async ({
+    page,
+  }) => {
+    // The catch-all route makes this branch the 404, so a mistyped URL used to
+    // be a dead end with no way out but the sidebar.
+    await mockSignedIn(page);
+    await page.goto("/does-not-exist");
+    await expect(page).toHaveURL(/\/does-not-exist$/);
+    await expect(page.getByText("Page not found")).toBeVisible();
+    // The attempted address is echoed, rather than leaving the operator to guess
+    // which part of it was wrong.
+    await expect(page.locator(".empty")).toContainText("/does-not-exist");
+    const back = page.getByRole("link", { name: "Go to the overview" });
+    await expect(back).toBeVisible();
+    await back.click();
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(
+      page.getByRole("heading", { name: "Engineering overview" }),
+    ).toBeVisible();
+  });
+});

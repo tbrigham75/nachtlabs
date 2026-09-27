@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -71,6 +72,14 @@ function destination(input: {
   // register. /setup now always explains itself, and creating an account is
   // still refused server-side with 409 setup_closed.
   if (!publicPage && signedOut) return "/login";
+  // The bare origin is not a page of its own. No dispatch branch matches "/"
+  // because parts is empty, so an authenticated operator typing the site
+  // address fell through to "Page not found" with no nav item highlighted and
+  // an empty breadcrumb. Send them where they were headed. This sits after the
+  // MFA, uninitialized and signed-out rules so an anonymous or unconfigured
+  // visitor still reaches /login or /setup first, and it uses replace so Back
+  // cannot return to "/" and loop.
+  if (path === "/" && !signedOut) return "/overview";
   return null;
 }
 export function Screen() {
@@ -178,6 +187,19 @@ export function Screen() {
     ].includes(parts[0])
   )
     content = <MonitoringScreen area={parts[0]} id={parts[1]} user={user} />;
-  else content = <Empty title="Page not found" />;
+  else
+    content = (
+      <Empty title="Page not found">
+        <p>
+          <code>{path}</code> is not a page in this installation. Nothing has
+          been changed and no action was performed.
+        </p>
+        <p>
+          <Link className="button primary" href="/overview">
+            Go to the overview
+          </Link>
+        </p>
+      </Empty>
+    );
   return <Shell user={user}>{content}</Shell>;
 }

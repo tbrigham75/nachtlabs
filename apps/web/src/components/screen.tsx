@@ -3,7 +3,12 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError, type User } from "@nachtlabs/api-client";
+import {
+  api,
+  ApiError,
+  type SetupPreflight,
+  type User,
+} from "@nachtlabs/api-client";
 import { AuthScreen } from "@/features/auth";
 import { Overview } from "@/features/overview";
 import { Projects, ProjectScreen } from "@/features/projects";
@@ -82,6 +87,27 @@ function destination(input: {
   if (path === "/" && !signedOut) return "/overview";
   return null;
 }
+/**
+ * Whether the address in this browser is missing from the permitted set.
+ *
+ * preflight's own origin_accepted is deliberately not consulted. A same-origin
+ * GET carries no Origin header at all, so that field reads false on a perfectly
+ * healthy installation and a banner driven by it would appear for every
+ * operator. The browser knows which address it is using; the server knows which
+ * it answers on; comparing them here is the only reliable signal, and it needs
+ * no request of its own.
+ *
+ * Silent until the set is known: guessing would be worse than saying nothing.
+ */
+export function originNotPermitted(
+  here: string | null,
+  permitted: string[],
+  preflightFailed: boolean,
+): boolean {
+  if (preflightFailed || here === null || permitted.length === 0) return false;
+  return !permitted.includes(here);
+}
+
 export function Screen() {
   const path = usePathname();
   const router = useRouter();
@@ -110,6 +136,25 @@ export function Screen() {
   const setupUnreachable = setup.isError;
   const signedOut = me.error instanceof ApiError && me.error.status === 401;
   const mfaRequired = me.data?.mfa_required === true;
+  /*
+    Which browser origins the API will answer on. Shared key with the setup
+    form's own preflight query so the two dedupe into a single request.
+
+    The comparison is made here, in the browser, against the address the browser
+    is actually using. It deliberately ignores preflight's origin_accepted: a
+    same-origin GET carries no Origin header, so that field reads false even on a
+    healthy installation and trusting it would nag every operator. window is
+    guarded because this component also renders on the server.
+  */
+  const preflight = useQuery({
+    queryKey: ["auth-preflight"],
+    queryFn: () => api<SetupPreflight>("/auth/preflight"),
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const here = typeof window === "undefined" ? null : window.location.origin;
+  const permitted = preflight.data?.allowed ?? [];
+  const originMismatch = originNotPermitted(here, permitted, preflight.isError);
   const target = destination({
     path,
     publicPage,
@@ -201,5 +246,17 @@ export function Screen() {
         </p>
       </Empty>
     );
-  return <Shell user={user}>{content}</Shell>;
+  return (
+    <Shell
+      user={user}
+      origin={{
+        here,
+        permitted,
+        mismatch: originMismatch,
+        secure: preflight.data?.secure_cookies ?? true,
+      }}
+    >
+      {content}
+    </Shell>
+  );
 }

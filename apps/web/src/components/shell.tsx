@@ -22,9 +22,16 @@ import { Dialog } from "./ui";
 
 export function Shell({
   user,
+  origin,
   children,
 }: {
   user: User;
+  origin: {
+    here: string | null;
+    permitted: string[];
+    mismatch: boolean;
+    secure: boolean;
+  };
   children: React.ReactNode;
 }) {
   const [drawer, setDrawer] = useState(false);
@@ -216,6 +223,38 @@ export function Shell({
           </div>
         </header>
         <main id="main" className="main">
+          {/*
+            The address in the browser is not one this installation answers on.
+            Every mutating request is refused with "Request origin is not
+            permitted", which on its own says nothing about what to change, so
+            the mismatch is named here instead. Persistent rather than
+            dismissible: it is a configuration fault, not a notice, and it
+            applies to every screen rather than one.
+          */}
+          {origin.mismatch && (
+            <p className="notice error" role="alert">
+              <strong>This address cannot save anything.</strong> You are
+              browsing <code>{origin.here}</code>, which is not one of the
+              origins this installation accepts, so every change you try to make
+              is refused. Accepted:{" "}
+              {origin.permitted.map((o) => (
+                <code key={o}>{o} </code>
+              ))}
+              An operator must add this address to{" "}
+              <code>NACHTLABS_ALLOWED_ORIGINS</code> and restart the API, then
+              reload. <code>make diagnose-setup</code> reports the mismatch from
+              the host.
+            </p>
+          )}
+          {origin.mismatch && !origin.secure && (
+            <p className="notice warning" role="status">
+              <strong>The session cookie cannot be marked Secure.</strong> At
+              least one accepted origin is plain HTTP, so the cookie is issued
+              without the Secure attribute to keep every origin usable. That is
+              the weaker choice; serve every accepted origin over HTTPS to get
+              it back.
+            </p>
+          )}
           {children}
         </main>
         <footer>

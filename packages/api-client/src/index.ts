@@ -54,13 +54,20 @@ export type Theme =
   | "nordic"
   | "solarized"
   | "system";
-/** GET /auth/preflight. Reports whether a mutating request from this origin would
- * be accepted, without creating an account to find out. `setup_token_required`
- * is the only way the interface can know to ask for the one-time token. */
+/** GET /auth/preflight. Reports whether a mutating request from this origin
+ * would be accepted, without creating an account to find out.
+ *
+ * `origin_accepted` is only meaningful when the request actually carried an
+ * `Origin` header. A same-origin GET does not, so a browser reading this from
+ * its own page always sees `origin: null` and `origin_accepted: false` even on a
+ * healthy installation. Callers must compare the address they know they are
+ * using against `allowed` instead. */
 export interface SetupPreflight {
   origin: string | null;
   expected: string;
+  allowed: string[];
   origin_accepted: boolean;
+  secure_cookies: boolean;
   setup_token_required: boolean;
   initialized: boolean;
   hint: string | null;

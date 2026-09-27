@@ -125,6 +125,29 @@ export function LlmSetupScreen({ user }: { user: User }) {
     try {
       return await action();
     } catch (error) {
+      /*
+        Matched on the message, not the code. The identical refusal is reported
+        as "origin" on the pre-authentication routes and as "csrf" on the
+        authenticated ones, and this wizard's writes go through the latter, so a
+        code check for "origin" alone would never fire here. "csrf" on its own
+        is ambiguous, since the CSRF token check reuses it, so both parts have
+        to match.
+      */
+      if (
+        error instanceof ApiError &&
+        (error.code === "origin" || error.code === "csrf") &&
+        /origin is not permitted/i.test(error.message)
+      ) {
+        const here =
+          typeof window === "undefined"
+            ? "this address"
+            : window.location.origin;
+        throw new Error(
+          `${here} is not an origin this installation accepts, so nothing was ` +
+            `saved. An operator must add it to NACHTLABS_ALLOWED_ORIGINS and ` +
+            `restart the API, then reload this page.`,
+        );
+      }
       if (error instanceof ApiError && error.code === "reauth_required") {
         setStep("confirm");
         setExpired(true);

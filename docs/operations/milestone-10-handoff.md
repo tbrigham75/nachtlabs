@@ -19,6 +19,8 @@ On Linux, in the documented environment, run:
 - Apply migration 0003 using make migrate with the migrator configuration, then scripts/grants.sql with the database administrator.
 - Apply the same migrations to a disposable database ending _test, then make test and make test-integration.
 - make migration-check; make api-client; make api-client-check; make test-e2e.
+  `make api-client` is the only supported way to regenerate `docs/api/openapi.json` and `packages/api-client/src/generated.d.ts`; it also runs Prettier, so `api-client-check` compares like with like. If you run `openapi-typescript` by hand you must run `prettier --write` on the output or the check will report a spurious difference.
+  `make test-e2e` needs `NACHTLABS_E2E_URL` pointing at an already-running isolated installation. On a host that already has `libnss3`/`libnspr4`/`libasound2` it needs nothing further. On an unprivileged build machine or in a container those are usually absent, Chromium then cannot launch, and every test fails with `error while loading shared libraries` while looking like an application fault; `make test-e2e` calls `scripts/browser-libs.sh`, which fetches only those three packages into the gitignored `.browser-libs` prefix and needs no root. To do it by hand: `export LD_LIBRARY_PATH="$(./scripts/browser-libs.sh)"`.
 - Start only API/worker/web, then make healthcheck. Exercise setup/login/MFA/themes/project/governance and service-key revocation.
 
 These are future operator instructions. None ran during authoring. Record actual output, runtime versions, failures and fixes. Resolve foundation errors before proceeding.

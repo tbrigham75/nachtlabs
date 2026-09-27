@@ -9,7 +9,7 @@
     "test": "pnpm --filter @nachtlabs/web test",
     "test:e2e": "playwright test",
     "format:check": "prettier --check apps/web packages/api-client tests/e2e",
-    "api:generate": "openapi-typescript docs/api/openapi.json -o packages/api-client/src/generated.d.ts"
+    "api:generate": "openapi-typescript docs/api/openapi.json -o packages/api-client/src/generated.d.ts && prettier --write packages/api-client/src/generated.d.ts"
   },
   "devDependencies": { "@playwright/test": "^1.51.0", "openapi-typescript": "^7.6.1", "prettier": "^3.5.0", "swagger-ui-dist": "^5.0.0" }
 }

@@ -17,6 +17,7 @@ coverage/
 playwright-report/
 test-results/
 .runtime/
+.browser-libs/
 *.log
 *.tsbuildinfo
 dist/

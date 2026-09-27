@@ -76,6 +76,43 @@ a persistent banner naming the address in use, every accepted origin, and the se
 the setup wizard turns the refusal into the same advice instead of passing the bare message through.
 A form that renders and then refuses is still worth checking here, but it should now say why.
 
+## Connecting a model server on your own network
+The model endpoint is not this host. It is whatever machine runs Ollama, and the
+address the connection stores is the one the API and worker dial, which has to be
+reachable from the machine running NachtLabs rather than from wherever the
+browser happens to be. The browser never contacts it: the interface is served
+with `connect-src 'self'`, and discovery runs in the worker while the planning
+call runs in the API.
+
+Two rules decide whether a remote endpoint can be saved at all, and the setup
+wizard now checks both before sending anything, because the API cannot report
+why it refused: pydantic's own reason is suppressed so submitted values cannot be
+echoed, which left a refused endpoint reading only as "Check the indicated
+fields" with no field named.
+
+Plain HTTP is accepted only for a loopback address. Any other address, including
+one on your own network, must be `https://`, and the transport has no fallback
+and never disables verification. A non-globally-routable address also needs
+"Permit this private or loopback address", which includes loopback, since
+`127.0.0.0/8` is not globally routable either.
+
+Because no DNS is ever resolved, the origin and the pin are independent: the
+origin supplies the `Host` header and the TLS name, and the pin is the numeric
+address actually connected to. A hostname in the origin with a different pin is
+valid and is the right shape for a stable address; a certificate for a bare IP
+must carry that IP as a subject alternative name, and the certificate authority
+that issued it has to be trusted via `NACHTLABS_INTEGRATION_CA_FILE` in **both**
+`api.env` and `worker.env`, since the discovery check and the planning call each
+build their own connection. Certificate verification was confirmed to work
+against an IP subject alternative name with no name resolution involved, and a
+mismatched address fails closed with `certificate verify failed: IP address`, so
+an address change means reissuing the certificate and editing the connection.
+
+This is a control-plane arrangement only. Agents do not run against a private
+address until the root execution catalog lists it with `allow_private_network`,
+and because the catalog digest is bound to the qualification receipt, that re-opens
+`scripts/qualify-executor.py`.
+
 ## Answering on more than one address
 `NACHTLABS_PUBLIC_URL` is the canonical origin: it builds the links in reset and delivery email, and
 it is the one production mode requires to be HTTPS. Additional browser addresses go in

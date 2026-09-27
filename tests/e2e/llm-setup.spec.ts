@@ -302,3 +302,136 @@ test.describe("llm setup wizard", () => {
     await expect(page).toHaveURL(/\/llm-setup$/);
   });
 });
+
+test.describe("connecting a remote model endpoint", () => {
+  // The operator's own report: a LAN Ollama submitted as plain HTTP came back as
+  // "Check the indicated fields", which names no field and says nothing about
+  // what to change. The API cannot report why, so the form has to.
+  async function mockProvider(page: import("@playwright/test").Page) {
+    await page.route("**/api/v1/integrations", async (route) => {
+      if (route.request().method() === "GET")
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: "[]",
+        });
+      // Whatever the form sends, the server answers exactly as it does in
+      // production: one opaque refusal, or a created connection.
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      const accepted = String(body.base_url ?? "").startsWith("https://");
+      return accepted
+        ? route.fulfill({
+            status: 201,
+            contentType: "application/json",
+            body: JSON.stringify({ id: "c1", version: 1 }),
+          })
+        : route.fulfill({
+            status: 422,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: {
+                code: "validation",
+                message: "Check the indicated fields",
+                fields: ["body"],
+              },
+            }),
+          });
+    });
+  }
+
+  test("a plain-HTTP LAN endpoint is explained instead of refused opaquely", async ({
+    page,
+  }) => {
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Connection name/).fill("LAN Ollama");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    // Names the field's rule, the offending address, and the way out.
+    const error = page.locator("p.error");
+    await expect(error).toContainText(
+      /Plain HTTP is only accepted for a loopback/,
+    );
+    await expect(error).toContainText("https://");
+    await expect(error).toContainText("192.168.1.50");
+    // And explicitly not the generic message it replaced.
+    await expect(error).not.toContainText("Check the indicated fields");
+  });
+
+  test("nothing is sent to the API for a shape the server would refuse", async ({
+    page,
+  }) => {
+    // Caught before the round trip, so no account or connection is at risk and no
+    // meaningless request is made.
+    await mock(page, {});
+    await mockProvider(page);
+    let posted = 0;
+    page.on("request", (r) => {
+      if (
+        new URL(r.url()).pathname.endsWith("/auth/integrations") ||
+        new URL(r.url()).pathname.endsWith("/integrations")
+      )
+        if (r.method() !== "GET") posted += 1;
+    });
+    await page.goto("/llm-setup");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.locator("p.error")).toBeVisible();
+    await page.waitForTimeout(600);
+    expect(posted).toBe(0);
+  });
+
+  test("the same endpoint over https is accepted on the first try", async ({
+    page,
+  }) => {
+    // The shape the API accepts, which is the whole point: a working
+    // configuration must not look impossible.
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Connection name/).fill("LAN Ollama");
+    await page.getByLabel(/Model endpoint origin/).fill("https://192.168.1.50");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.getByText(/Endpoint saved/)).toBeVisible({
+      timeout: 15000,
+    });
+  });
+
+  test("a missing private permission is named rather than swallowed", async ({
+    page,
+  }) => {
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Model endpoint origin/).fill("https://192.168.1.50");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    // Default is Yes, so turn it off to exercise the rule.
+    await page
+      .getByLabel(/Permit this private or loopback/)
+      .selectOption("false");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.locator("p.error")).toContainText(
+      /Permit this private or loopback/,
+    );
+  });
+
+  test("the origin help states the loopback-only rule before anything is typed", async ({
+    page,
+  }) => {
+    // The rule used to live only in a different field's help text, which is how
+    // an operator ends up composing a shape that cannot work.
+    await mock(page, {});
+    await page.goto("/llm-setup");
+    const help = page.locator(".field", { hasText: "Model endpoint origin" });
+    await expect(help).toContainText(/https:\/\//);
+    await expect(help).toContainText(/loopback/);
+  });
+});

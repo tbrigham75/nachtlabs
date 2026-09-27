@@ -193,6 +193,28 @@ export function LlmSetupScreen({ user }: { user: User }) {
           blocked until then.
         </p>
       )}
+      {/*
+        Two facts that are static and true of any https or private endpoint, and
+        that are otherwise discovered the hard way: a certificate this
+        installation does not trust is refused, and a private address is refused
+        for agent egress by the executor.
+      */}
+      {(state.connection === null || state.connection.loopback_pinned) && (
+        <p className="notice" role="status">
+          <strong>
+            Two things to know before an https endpoint can answer.
+          </strong>{" "}
+          Its certificate must be one this installation trusts; if you use your
+          own certificate authority, point{" "}
+          <code>NACHTLABS_INTEGRATION_CA_FILE</code> at the CA bundle in{" "}
+          <code>api.env</code> <em>and</em> <code>worker.env</code>, because the
+          discovery check and the planning call each build their own connection
+          and setting it in only one is not enough. Separately, agents do not
+          run against a private address until the root execution catalog lists
+          it with <code>allow_private_network</code>, which re-opens the
+          executor qualification.
+        </p>
+      )}
       {state.connection?.loopback_pinned && (
         <p className="notice warning" role="status">
           <strong>
@@ -324,6 +346,158 @@ function ConfirmStep({
   );
 }
 
+/*
+  Client-side mirror of the server's Endpoint.validate().
+*/
+export type EndpointInput = {
+  baseUrl: string;
+  pin: string;
+  allowPrivate: boolean;
+  allowHttp: boolean;
+};
+
+/** Address classes the server refuses for the pin, whatever the permissions.
+ * Kept in step with METADATA in integrations/transport.py. */
+const NEVER_PERMITTED = new Set([
+  "169.254.169.254",
+  "169.254.170.2",
+  "100.100.100.200",
+  "168.63.129.16",
+]);
+
+type Parsed = { text: string; version: 4 | 6; parts: number[] };
+
+function parseIp(value: string): Parsed | null {
+  const text = value.trim();
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (v4) {
+    const parts = v4.slice(1, 5).map(Number);
+    return parts.every((n) => n >= 0 && n <= 255)
+      ? { text, version: 4, parts }
+      : null;
+  }
+  // A deliberately conservative IPv6 shape check. The server is authoritative;
+  // this only has to recognise enough to classify the address, and anything it
+  // cannot classify is treated as not-loopback, which is the restrictive side.
+  if (
+    text.includes("%") ||
+    !text.includes(":") ||
+    !/^[0-9a-fA-F:]+$/.test(text)
+  ) {
+    return null;
+  }
+  return { text, version: 6, parts: [] };
+}
+
+function isLoopbackIp(ip: Parsed): boolean {
+  if (ip.version === 4) return ip.parts[0] === 127;
+  return ip.text === "::1" || ip.text === "0:0:0:0:0:0:0:1";
+}
+
+/**
+ * Whether the address counts as publicly routable, which is the server's test
+ * for whether the private permission is needed at all.
+ *
+ * The server asks ipaddress.is_global, so loopback needs the permission too,
+ * even though it is the operator's own machine: the wizard's loopback defaults
+ * turn it on for exactly that reason. Anything not recognised here is treated as
+ * non-global, which is the restrictive side of the same coin.
+ */
+function isGlobalIp(ip: Parsed): boolean {
+  if (ip.version === 6) return false;
+  const [a, b] = ip.parts;
+  if (a === 0 || a >= 224) return false; // unspecified, reserved, multicast
+  if (a === 127) return false; // loopback
+  if (a === 10) return false; // private
+  if (a === 172 && b >= 16 && b <= 31) return false; // private
+  if (a === 192 && b === 168) return false; // private
+  if (a === 169 && b === 254) return false; // link local
+  if (a === 100 && b >= 64 && b <= 127) return false; // carrier grade NAT
+  return true;
+}
+
+/**
+ * Everything the server is certain to refuse, said in terms the operator can act
+ * on.
+ *
+ * This only ever rejects. It never rewrites what was typed and never relaxes a
+ * requirement, so the server stays the authority and nothing it would accept is
+ * blocked here. Every rule is deterministic rather than a judgement call, so a
+ * disagreement can only ever be a bug and not a difference of opinion.
+ *
+ * It exists because the API cannot tell the operator why. Pydantic's own reason
+ * is suppressed on purpose, since it can echo submitted values, which left a LAN
+ * endpoint refused as "Check the indicated fields" with fields: ["body"] and no
+ * indication of anything.
+ */
+export function endpointProblems(input: EndpointInput): string[] {
+  const problems: string[] = [];
+  const raw = input.baseUrl.trim();
+  if (!raw) return ["Enter the model endpoint origin."];
+  if (!/^https?:\/\//i.test(raw)) {
+    return ["The origin must start with http:// or https://."];
+  }
+  if (/[@]/.test(raw.split("://")[1] ?? "")) {
+    problems.push("The origin must not contain credentials.");
+  }
+  if (/[?#]/.test(raw)) {
+    problems.push("The origin must not contain a query or fragment.");
+  }
+  const afterScheme = raw.slice(raw.indexOf("://") + 3);
+  const path = afterScheme.split(/[?#]/)[0].replace(/^[^/]*\/?/, "");
+  if (path) {
+    problems.push(
+      "The origin must not include a path, only scheme, host and port.",
+    );
+  }
+
+  const pin = parseIp(input.pin);
+  if (!pin) {
+    problems.push(
+      "The pinned address must be one numeric address such as 127.0.0.1, resolved on the host console.",
+    );
+    // Nothing further can be classified without an address.
+    return problems;
+  }
+  if (NEVER_PERMITTED.has(input.pin.trim())) {
+    problems.push(
+      "That address is a cloud metadata destination and is never permitted.",
+    );
+    return problems;
+  }
+  if (!isGlobalIp(pin) && !input.allowPrivate) {
+    problems.push(
+      'That address is not publicly routable, so turn on "Permit this private or loopback address".',
+    );
+  }
+
+  const host = afterScheme.split(":")[0].replace(/\/+$/, "");
+  const urlIsIp = parseIp(host);
+  if (urlIsIp && host !== input.pin.trim()) {
+    problems.push(
+      `The origin names the address ${host}, but the pin is ${input.pin.trim()}. They must be the same address, or the origin should use a hostname.`,
+    );
+  }
+  // Keyed on the scheme in the origin, not on the permission flag. Both of the
+  // server's http rules test the scheme, so an https endpoint is fine with the
+  // flag left on, and rejecting that would block a configuration the API
+  // accepts. An earlier version of this file keyed on the flag instead and
+  // refused exactly the default https shape the wizard offers.
+  if (raw.slice(0, raw.indexOf("://")).toLowerCase() === "http") {
+    if (!isLoopbackIp(pin)) {
+      problems.push(
+        `Plain HTTP is only accepted for a loopback address, and this one is ${input.pin.trim()}. Use https:// for it.`,
+      );
+    }
+    if (!input.allowHttp) {
+      problems.push(
+        'Turn on "Permit HTTP for this loopback endpoint", or use https:// instead.',
+      );
+    }
+  }
+  return problems;
+}
+
 function ConnectionStep({
   existing,
   guard,
@@ -340,13 +514,13 @@ function ConnectionStep({
       name: "base_url",
       label: "Model endpoint origin",
       required: true,
-      help: "Origin only, no path and no credentials. Local Ollama is usually http://127.0.0.1:11434.",
+      help: "Scheme, host and port only. Plain HTTP is accepted for a loopback address such as http://127.0.0.1:11434; any other address, including one on your own network, must be https://.",
     },
     {
       name: "address",
       label: "Pinned server IP",
       required: true,
-      help: "Administrator-approved numeric address, resolved on the host console. The interface never resolves hostnames on your behalf.",
+      help: "One numeric address, resolved on the host console; the interface never resolves hostnames for you. It is the address of the model server, not of this one. If the origin above already contains an IP, the two must match.",
     },
     {
       name: "allow_private",
@@ -357,7 +531,7 @@ function ConnectionStep({
       name: "allow_http",
       label: "Permit HTTP for this loopback endpoint",
       options: booleans,
-      help: "Non-loopback endpoints require HTTPS. Cloud metadata destinations are always rejected.",
+      help: "Only needed for a loopback address. Every other address requires HTTPS, and a cloud metadata destination is rejected outright.",
     },
     {
       name: "timeout_seconds",
@@ -393,6 +567,15 @@ function ConnectionStep({
         }}
         label="Save endpoint"
         submit={async (v) => {
+          // Checked here so the operator is told what is wrong and how to fix
+          // it, rather than receiving a refusal the API cannot explain.
+          const problems = endpointProblems({
+            baseUrl: v.base_url,
+            pin: v.address,
+            allowPrivate: v.allow_private === "true",
+            allowHttp: v.allow_http === "true",
+          });
+          if (problems.length > 0) throw new Error(problems[0]);
           const connection = await guard(() =>
             write<{ id: string }>("/integrations", {
               name: v.name,

@@ -5,6 +5,14 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public requestId?: string,
+    /**
+     * Field paths the server named, when it named any. Deliberately not the
+     * reason the request was refused: the API suppresses pydantic's own message
+     * because that can echo submitted values, so a whole-object rule can only
+     * report the single path "body" and explains nothing. Where the server did
+     * name fields, this is what turns "Check the indicated fields" into a field.
+     */
+    public fields?: string[],
   ) {
     super(message);
   }
@@ -40,6 +48,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       data.error?.code ?? "http_error",
       data.error?.message ?? "Request failed",
       data.error?.request_id,
+      Array.isArray(data.error?.fields) ? data.error.fields : undefined,
     );
   return data as T;
 }

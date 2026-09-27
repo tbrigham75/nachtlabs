@@ -41,6 +41,7 @@ export function Form({
   const { register, handleSubmit, formState, setError, resetField } = useForm<
     Record<string, string>
   >({ defaultValues: initial, resolver: zodResolver(z.object(shape)) });
+  const [rejected, setRejected] = useState<string[]>([]);
   return (
     <form
       className="form"
@@ -54,6 +55,12 @@ export function Form({
           setError("root", {
             message: error instanceof Error ? error.message : "Unable to save",
           });
+          // Keep the server's field names when it gave any that mean something.
+          setRejected(
+            error instanceof ApiError
+              ? (error.fields ?? []).filter((f) => f !== "body" && f !== "")
+              : [],
+          );
         }
       })}
     >
@@ -101,6 +108,16 @@ export function Form({
       {formState.errors.root && (
         <p className="error" role="alert">
           {formState.errors.root.message}
+          {/*
+            The API names the fields it rejected where it can, and drops the
+            reason on purpose so submitted values cannot be echoed. When it
+            named a real field, saying which turns a generic refusal into
+            something actionable. A whole-object rule reports the path "body",
+            which points at nothing, so it is not worth printing.
+          */}
+          {rejected.length > 0 && (
+            <small> Rejected: {rejected.join(", ")}</small>
+          )}
         </p>
       )}
       <button

@@ -65,6 +65,47 @@ export interface SetupPreflight {
   initialized: boolean;
   hint: string | null;
 }
+/** GET /llm-readiness. Derived setup state for the model/agent chain.
+ *
+ * The four states the architecture keeps apart stay apart: a saved connection
+ * is not a working one, a successful discovery is not a compatibility proof, and
+ * `execution_available` reflects a root-owned qualification the API cannot see,
+ * so it is always false here. */
+export interface LlmReadiness {
+  provider_network_enabled: boolean;
+  connection: {
+    id: string;
+    name: string;
+    active: boolean;
+    version: number;
+    loopback_pinned: boolean;
+  } | null;
+  connection_count: number;
+  discovery: {
+    state:
+      | "not_run"
+      | "pending"
+      | "running"
+      | "succeeded"
+      | "failed"
+      | "stale"
+      | "expired";
+    models: { name: string; digest: string | null }[];
+    checked_at: string | null;
+  };
+  implementation_profile: { id: string; model: string } | null;
+  verifier_profile: { id: string; model: string } | null;
+  planning_profile: { id: string; model: string } | null;
+  agent: {
+    id: string;
+    name: string;
+    provider: string;
+    executable: string;
+  } | null;
+  distinct_models: boolean;
+  execution_available: boolean;
+  complete: boolean;
+}
 export interface User {
   id: string;
   email: string;

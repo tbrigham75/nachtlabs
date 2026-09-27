@@ -1,12 +1,23 @@
 "use client";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { api, type Project, type User } from "@nachtlabs/api-client";
+import {
+  api,
+  type LlmReadiness,
+  type Project,
+  type User,
+} from "@nachtlabs/api-client";
 import { Badge, ErrorNotice, Heading, Loading } from "@/components/ui";
 export function Overview({ user }: { user: User }) {
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api<Project[]>("/projects"),
+  });
+  const admin = ["owner", "admin"].includes(user.role);
+  const llm = useQuery({
+    queryKey: ["llm-readiness"],
+    queryFn: () => api<LlmReadiness>("/llm-readiness"),
+    enabled: admin,
   });
   const status = useQuery({
     queryKey: ["overview"],
@@ -20,12 +31,48 @@ export function Overview({ user }: { user: User }) {
         title="Engineering overview"
         note="Establish your projects, define their boundaries, and make the acceptance criteria explicit."
       >
-        {["owner", "admin"].includes(user.role) && (
+        {admin && (
           <Link className="button primary" href="/projects/new">
             + Create project
           </Link>
         )}
       </Heading>
+      {/*
+        The first-login prompt. Deliberately a panel rather than a redirect: this
+        installation may be mid-configuration for a legitimate reason, and the
+        app elsewhere refuses to move an operator out from under a click.
+      */}
+      {admin && llm.data && !llm.data.complete && (
+        <section className="panel" aria-labelledby="llm-callout">
+          <div className="panel-head">
+            <h2 id="llm-callout">Finish setting up your LLM</h2>
+            <Badge>Next step</Badge>
+          </div>
+          <p>
+            {llm.data.complete
+              ? ""
+              : !llm.data.connection?.active
+                ? "No model endpoint is configured. The wizard walks the order the API enforces: endpoint, connection check, distinct implementation and verification models, then a coding agent."
+                : llm.data.discovery.state !== "succeeded"
+                  ? `A model endpoint is saved but no current connection check has succeeded (${llm.data.discovery.state.replace("_", " ")}).`
+                  : !llm.data.distinct_models
+                    ? "Implementation and verification must use different model identifiers."
+                    : "A coding agent still needs to be bound to a model profile."}
+          </p>
+          {!llm.data.provider_network_enabled && (
+            <p className="notice warning">
+              Provider checks are disabled by installation policy. You can still
+              store configuration, but the connection check will stay blocked
+              until an operator enables{" "}
+              <code>NACHTLABS_INTEGRATION_NETWORK_ENABLED</code> and restarts
+              the API and worker.
+            </p>
+          )}
+          <Link className="button primary" href="/llm-setup">
+            Open the setup wizard
+          </Link>
+        </section>
+      )}
       <ErrorNotice error={projects.error || status.error} />
       <div className="grid">
         <section className="panel stat">
@@ -76,10 +123,23 @@ export function Overview({ user }: { user: User }) {
               </Badge>
             </li>
             <li>
-              <Link href="/integrations">
-                Configure connections and agent profiles
+              {/*
+                Replaced a static "Available" badge with the real derived state.
+                A link that is always there but says honestly what is missing
+                is better than one that disappears when a flag is wrong.
+              */}
+              <Link href="/llm-setup">
+                {llm.data?.complete
+                  ? "Model and agent configuration"
+                  : "Set up your LLM"}
               </Link>
-              <Badge>Available</Badge>
+              {llm.data ? (
+                <Badge good={llm.data.complete}>
+                  {llm.data.complete ? "Configured" : "Action available"}
+                </Badge>
+              ) : (
+                <Badge>Checking</Badge>
+              )}
             </li>
           </ul>
         </section>

@@ -191,6 +191,10 @@ export function Shell({
                   <small>{user.role}</small>
                 </p>
                 <Link href="/settings/security">Security settings</Link>
+                {/* Always present, like the first-run setup link on sign-in:
+                    a wizard reachable only while it is incomplete is one a
+                    wrong or stale readiness flag can take away. */}
+                {admin && <Link href="/llm-setup">LLM setup wizard</Link>}
                 <button
                   onClick={async () => {
                     try {

@@ -31,6 +31,31 @@
         "security": []
       }
     },
+    "/api/v1/auth/preflight": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Preflight",
+        "description": "Report whether a mutating request from this origin would be accepted.\n\nA GET never reaches browser_origin, and any mutating endpoint rejects an\ninvalid body during validation before that check runs, so a probe cannot\ndistinguish \"origin refused\" from \"bad input\" without creating an account.\nThis answers it directly and mutates nothing.\n\nIt reports the configured public URL so an operator can see the exact\nmismatch rather than infer it. That is operator-facing configuration on a\nsingle-tenant self-hosted console, comparable to what setup-status already\ndiscloses, and it is not reachable to learn anything about accounts.",
+        "operationId": "preflight_api_v1_auth_preflight_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preflight Api V1 Auth Preflight Get"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/api/v1/auth/setup": {
       "post": {
         "tags": [
@@ -3488,7 +3513,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Dashboard Api V1 Monitoring Get"
+                }
               }
             }
           }
@@ -3575,7 +3604,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Logs Api V1 Logs Get"
+                }
               }
             }
           },
@@ -3604,7 +3640,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Incidents Api V1 Incidents Get"
+                }
               }
             }
           }
@@ -3635,7 +3678,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Incident Api V1 Incidents  Identifier  Get"
+                }
               }
             }
           },
@@ -3686,7 +3733,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Incident Action Api V1 Incidents  Identifier  Actions Post"
+                }
               }
             }
           },
@@ -3715,7 +3766,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Recommendations Api V1 Recommendations Get"
+                }
               }
             }
           }
@@ -3756,7 +3814,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Recommendation Action Api V1 Recommendations  Identifier  Actions Post"
+                }
               }
             }
           },
@@ -3785,7 +3847,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Notifications Api V1 Notifications Get"
+                }
               }
             }
           }
@@ -3816,7 +3885,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notification Read Api V1 Notifications  Identifier  Read Post"
+                }
               }
             }
           },
@@ -3845,7 +3920,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Saved Searches Api V1 Saved Searches Get"
+                }
               }
             }
           }
@@ -3872,7 +3954,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Save Search Api V1 Saved Searches Post"
+                }
               }
             }
           },
@@ -3901,7 +3989,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Retention Api V1 Retention Get"
+                }
               }
             }
           }
@@ -3928,7 +4020,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object",
+                  "title": "Response Update Retention Api V1 Retention Put"
+                }
               }
             }
           },
@@ -3992,7 +4090,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response System Logs Api V1 System Logs Get"
+                }
               }
             }
           },
@@ -4033,7 +4138,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Binding Api V1 Projects  Project Id  Webhook Get"
+                }
               }
             }
           },
@@ -4082,7 +4191,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Configure Api V1 Projects  Project Id  Webhook Put"
+                }
               }
             }
           },
@@ -4123,7 +4236,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Intake Api V1 Hooks  Identifier  Post"
+                }
               }
             }
           },
@@ -6450,29 +6567,35 @@
             "type": "string",
             "maxLength": 120,
             "minLength": 1,
-            "title": "Name"
+            "title": "Name",
+            "default": "Owner"
           },
           "organization": {
             "type": "string",
             "maxLength": 120,
             "minLength": 1,
-            "title": "Organization"
+            "title": "Organization",
+            "default": "NachtLabs"
           },
           "bootstrap_token": {
-            "type": "string",
-            "format": "password",
-            "title": "Bootstrap Token",
-            "writeOnly": true
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bootstrap Token"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "email",
-          "password",
-          "name",
-          "organization",
-          "bootstrap_token"
+          "password"
         ],
         "title": "Setup"
       },

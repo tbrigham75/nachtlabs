@@ -44,6 +44,87 @@ async function mockApiDown(page: import("@playwright/test").Page) {
   );
 }
 
+const token = "one-time-setup-token";
+
+// Serve a real setup response so a successful submit behaves like production.
+// tokenRequired models NACHTLABS_SETUP_TOKEN_REQUIRED; refuseToken models the
+// stale-flag case, where preflight is wrong and only the 403 reveals the need.
+async function mockSetup(
+  page: import("@playwright/test").Page,
+  options: { tokenRequired?: boolean; refuseToken?: boolean } = {},
+) {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/stream"))
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: ": heartbeat\n\n",
+      });
+    if (path.endsWith("/auth/me"))
+      return route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "unauthenticated" } }),
+      });
+    if (path.endsWith("/auth/setup-status"))
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ initialized: false }),
+      });
+    if (path.endsWith("/auth/preflight"))
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          origin: "http://localhost:3000",
+          expected: "http://localhost:3000",
+          origin_accepted: true,
+          setup_token_required:
+            options.tokenRequired === true && options.refuseToken !== true,
+          initialized: false,
+          hint: null,
+        }),
+      });
+    if (path.endsWith("/auth/setup")) {
+      if (
+        options.refuseToken &&
+        !(route.request().postData() ?? "").includes(token)
+      )
+        return route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "invalid_setup_token",
+              message: "Invalid setup token",
+            },
+          }),
+        });
+      return route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "00000000-0000-4000-8000-000000000002",
+          email: "owner@acme.example",
+          name: "Owner",
+          role: "owner",
+          active: true,
+          theme: "midnight",
+          mfa_enabled: false,
+          version: 1,
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({}),
+    });
+  });
+}
+
 test.describe("first-run discovery", () => {
   test("an installation with no account offers Owner setup instead of sign-in", async ({
     page,
@@ -266,51 +347,6 @@ test.describe("setup is always discoverable", () => {
 });
 
 test.describe("first-time setup form", () => {
-  // Serve a real setup response so a successful submit behaves like production.
-  async function mockSetup(page: import("@playwright/test").Page) {
-    await page.route("**/api/v1/**", async (route) => {
-      const path = new URL(route.request().url()).pathname;
-      if (path.endsWith("/stream"))
-        return route.fulfill({
-          status: 200,
-          contentType: "text/event-stream",
-          body: ": heartbeat\n\n",
-        });
-      if (path.endsWith("/auth/me"))
-        return route.fulfill({
-          status: 401,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { code: "unauthenticated" } }),
-        });
-      if (path.endsWith("/auth/setup-status"))
-        return route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ initialized: false }),
-        });
-      if (path.endsWith("/auth/setup"))
-        return route.fulfill({
-          status: 201,
-          contentType: "application/json",
-          body: JSON.stringify({
-            id: "00000000-0000-4000-8000-000000000002",
-            email: "owner@acme.example",
-            name: "Owner",
-            role: "owner",
-            active: true,
-            theme: "midnight",
-            mfa_enabled: false,
-            version: 1,
-          }),
-        });
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({}),
-      });
-    });
-  }
-
   test("asks for an email and the password twice", async ({ page }) => {
     await mockSetup(page);
     await page.goto("/setup");
@@ -364,5 +400,77 @@ test.describe("first-time setup form", () => {
       email: "owner@acme.example",
       password: "correct-horse-battery",
     });
+    // A default installation must never be asked for a secret it never issued.
+    expect(posted).not.toHaveProperty("bootstrap_token");
+  });
+});
+
+test.describe("setup token", () => {
+  test("a default first run never asks for a token", async ({ page }) => {
+    // Regression: demanding a token nobody has been told about would dead-end
+    // every ordinary installation. preflight answering "not required" must keep
+    // the field off the form.
+    await mockSetup(page);
+    await page.goto("/setup");
+    await expect(page.getByLabel(/Email address/)).toBeVisible();
+    await expect(page.getByLabel(/setup token/i)).toHaveCount(0);
+  });
+
+  test("an installation that requires the token asks for it and sends it", async ({
+    page,
+  }) => {
+    // NACHTLABS_SETUP_TOKEN_REQUIRED=true, so the browser is the only place the
+    // operator can supply the one-time token. Without this the documented
+    // hardening made first-run setup impossible through the interface.
+    await mockSetup(page, { tokenRequired: true });
+    let posted: Record<string, unknown> | null = null;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/auth/setup"))
+        posted = JSON.parse(request.postData() ?? "{}");
+    });
+    await page.goto("/setup");
+    const field = page.getByLabel(/setup token/i);
+    await expect(field).toBeVisible();
+    await field.fill(token);
+    await page.getByLabel(/Email address/).fill("owner@acme.example");
+    await page.getByLabel(/^Password/).fill("correct-horse-battery");
+    await page.getByLabel(/^Confirm password/).fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Create Owner account" }).click();
+    await page.waitForURL("**/overview", { timeout: 15000 }).catch(() => {});
+    expect(posted).toMatchObject({ bootstrap_token: token });
+    // The confirmation is still stripped; extra="forbid" would reject it.
+    expect(posted).not.toHaveProperty("password_confirm");
+  });
+
+  test("a refused token reveals the field without losing what was typed", async ({
+    page,
+  }) => {
+    // The flag can be wrong or absent, and only the 403 knows the truth. The
+    // operator must not be left with an unexplained refusal and no field.
+    await mockSetup(page, { refuseToken: true });
+    await page.goto("/setup");
+    await expect(page.getByLabel(/setup token/i)).toHaveCount(0);
+    await page.getByLabel(/Email address/).fill("owner@acme.example");
+    await page.getByLabel(/^Password/).fill("correct-horse-battery");
+    await page.getByLabel(/^Confirm password/).fill("correct-horse-battery");
+    await page.getByRole("button", { name: "Create Owner account" }).click();
+    // Next.js injects its own role="alert" route announcer, so the form's
+    // error paragraph has to be addressed directly.
+    await expect(page.locator("p.error")).toContainText(
+      "requires the one-time setup token",
+    );
+    const field = page.getByLabel(/setup token/i);
+    await expect(field).toBeVisible();
+    // Revealing the field must not throw away the account being created.
+    await expect(page.getByLabel(/Email address/)).toHaveValue(
+      "owner@acme.example",
+    );
+    await expect(page.getByLabel(/^Password/)).toHaveValue(
+      "correct-horse-battery",
+    );
+    // And supplying it then succeeds, because the API still accepts the token.
+    await field.fill(token);
+    await page.getByRole("button", { name: "Create Owner account" }).click();
+    await page.waitForURL("**/overview", { timeout: 15000 });
   });
 });

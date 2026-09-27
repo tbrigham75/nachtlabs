@@ -90,7 +90,7 @@ Expected: services active, liveness `alive`, readiness `ready`/schema `0002`, lo
 
 ## 7. Identity checks
 
-Retrieve `/etc/nachtlabs/credentials/bootstrap-token` locally as administrator and enter it only on your `/setup` page. Create a synthetic Owner with a unique strong password. Never include credentials, MFA material or recovery codes in screenshots/logs you return.
+Retrieve `/etc/nachtlabs/credentials/bootstrap-token` locally as administrator. The `/setup` page asks for it as "Setup token" only when the installation was configured with `NACHTLABS_SETUP_TOKEN_REQUIRED=true`; on a default installation the field is absent and you supply nothing. If a submission is refused for a missing token, the field appears and explains where the token lives. Create a synthetic Owner with a unique strong password. Never include credentials, MFA material or recovery codes in screenshots/logs you return.
 
 - First setup creates the Owner; a second attempt is rejected.
 - Login/logout work and logged-out sessions cannot read `/api/v1/auth/me`.

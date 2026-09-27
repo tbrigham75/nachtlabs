@@ -2,9 +2,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Moon } from "lucide-react";
-import { write } from "@nachtlabs/api-client";
+import {
+  api,
+  ApiError,
+  write,
+  type SetupPreflight,
+} from "@nachtlabs/api-client";
 import { Form, type Field } from "@/components/ui";
 
 export function ApiUnreachable({ onRetry }: { onRetry: () => void }) {
@@ -47,6 +52,7 @@ export function AuthScreen({
   const [challenge, setChallenge] = useState<string>();
   const [message, setMessage] = useState("");
   const [token, setToken] = useState("");
+  const [tokenRefused, setTokenRefused] = useState(false);
   useEffect(() => {
     const value = new URLSearchParams(window.location.hash.slice(1)).get(
       "token",
@@ -66,6 +72,23 @@ export function AuthScreen({
   // in to. Offer Owner setup instead of a form that cannot succeed.
   const firstRun = initialized === false;
   const setupClosed = initialized === true && setup;
+  /*
+    The setup token is only demanded when the operator set
+    NACHTLABS_SETUP_TOKEN_REQUIRED, so the form must ask for it only then, or a
+    default first run would demand a secret nobody has been told about. Only a
+    positive "required" reveals the field: a failed or unknown answer leaves it
+    hidden, and a refused submission reveals it anyway, so a wrong or missing
+    flag can never leave an operator unable to register.
+  */
+  const preflight = useQuery({
+    queryKey: ["auth-preflight"],
+    queryFn: () => api<SetupPreflight>("/auth/preflight"),
+    enabled: setup && !setupClosed,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const tokenRequired =
+    preflight.data?.setup_token_required === true || tokenRefused;
   const title = setupUnreachable
     ? "NachtLabs is not reachable"
     : firstRun
@@ -93,6 +116,24 @@ export function AuthScreen({
       ]
     : setup
       ? [
+          /*
+            Only present when this installation demands the one-time token. It
+            gates the rest of the form, so it comes first, and it is a password
+            field so Form clears it after a successful submit like any other
+            secret.
+          */
+          ...(tokenRequired
+            ? [
+                {
+                  name: "bootstrap_token",
+                  label: "Setup token",
+                  type: "password",
+                  required: true,
+                  max: 512,
+                  help: "The one-time token an operator stored on the host at credentials/bootstrap-token.",
+                },
+              ]
+            : []),
           {
             name: "organization",
             label: "Organization name",
@@ -301,12 +342,37 @@ export function AuthScreen({
                     }
                     // The API forbids unknown fields, so the confirmation must
                     // never leave the browser. Name the payload explicitly.
-                    await write("/auth/setup", {
-                      organization: values.organization,
-                      name: values.name,
-                      email: values.email,
-                      password: values.password,
-                    });
+                    try {
+                      await write("/auth/setup", {
+                        organization: values.organization,
+                        name: values.name,
+                        email: values.email,
+                        password: values.password,
+                        // Omitted unless the field is present, so a default
+                        // first run never sends an empty secret.
+                        ...(values.bootstrap_token
+                          ? { bootstrap_token: values.bootstrap_token }
+                          : {}),
+                      });
+                    } catch (error) {
+                      /*
+                        A refused token is the one setup failure the form can
+                        fix itself, so reveal the field and keep everything the
+                        operator already typed. The alternative is a bare 403
+                        with no field to fill in and no route forward.
+                      */
+                      if (
+                        error instanceof ApiError &&
+                        error.code === "invalid_setup_token"
+                      ) {
+                        setTokenRefused(true);
+                        throw new Error(
+                          "This installation requires the one-time setup token. " +
+                            "An operator stored it on the host at credentials/bootstrap-token.",
+                        );
+                      }
+                      throw error;
+                    }
                     await signedIn();
                   } else if (login) {
                     const result = await write<{

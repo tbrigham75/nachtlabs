@@ -21,6 +21,36 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/preflight": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Preflight
+     * @description Report whether a mutating request from this origin would be accepted.
+     *
+     *     A GET never reaches browser_origin, and any mutating endpoint rejects an
+     *     invalid body during validation before that check runs, so a probe cannot
+     *     distinguish "origin refused" from "bad input" without creating an account.
+     *     This answers it directly and mutates nothing.
+     *
+     *     It reports the configured public URL so an operator can see the exact
+     *     mismatch rather than infer it. That is operator-facing configuration on a
+     *     single-tenant self-hosted console, comparable to what setup-status already
+     *     discloses, and it is not reachable to learn anything about accounts.
+     */
+    get: operations["preflight_api_v1_auth_preflight_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/setup": {
     parameters: {
       query?: never;
@@ -2288,15 +2318,18 @@ export interface components {
        * Format: password
        */
       password: string;
-      /** Name */
-      name: string;
-      /** Organization */
-      organization: string;
       /**
-       * Bootstrap Token
-       * Format: password
+       * Name
+       * @default Owner
        */
-      bootstrap_token: string;
+      name: string;
+      /**
+       * Organization
+       * @default NachtLabs
+       */
+      organization: string;
+      /** Bootstrap Token */
+      bootstrap_token?: string | null;
     };
     /** StopInput */
     StopInput: {
@@ -2490,6 +2523,28 @@ export interface operations {
         content: {
           "application/json": {
             [key: string]: boolean;
+          };
+        };
+      };
+    };
+  };
+  preflight_api_v1_auth_preflight_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
           };
         };
       };
@@ -4924,7 +4979,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -4949,7 +5006,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
       /** @description Validation Error */
@@ -4978,7 +5037,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
     };
@@ -5000,7 +5061,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -5035,7 +5098,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -5064,7 +5129,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
     };
@@ -5090,7 +5157,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -5119,7 +5188,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
     };
@@ -5141,7 +5212,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: boolean;
+          };
         };
       };
       /** @description Validation Error */
@@ -5170,7 +5243,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
     };
@@ -5194,7 +5269,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: string;
+          };
         };
       };
       /** @description Validation Error */
@@ -5223,7 +5300,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
     };
@@ -5247,7 +5326,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: number;
+          };
         };
       };
       /** @description Validation Error */
@@ -5279,7 +5360,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          }[];
         };
       };
       /** @description Validation Error */
@@ -5310,7 +5393,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -5345,7 +5430,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -5376,7 +5463,9 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */

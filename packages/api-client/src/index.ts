@@ -54,6 +54,17 @@ export type Theme =
   | "nordic"
   | "solarized"
   | "system";
+/** GET /auth/preflight. Reports whether a mutating request from this origin would
+ * be accepted, without creating an account to find out. `setup_token_required`
+ * is the only way the interface can know to ask for the one-time token. */
+export interface SetupPreflight {
+  origin: string | null;
+  expected: string;
+  origin_accepted: boolean;
+  setup_token_required: boolean;
+  initialized: boolean;
+  hint: string | null;
+}
 export interface User {
   id: string;
   email: string;

@@ -165,3 +165,24 @@ class BindingOutput(BaseModel):
     verifier_agent_id: UUID | None
     require_distinct_models: bool
     version: int
+
+
+class LlmReadinessOutput(BaseModel):
+    """Derived setup state for the model/agent chain.
+
+    Every field is read from existing records. `execution_available` is a
+    constant false: execution depends on a root-owned qualification this API
+    cannot observe, so reporting it as anything else would be fabrication.
+    """
+
+    provider_network_enabled: bool
+    connection: dict[str, Any] | None
+    connection_count: int
+    discovery: dict[str, Any]
+    implementation_profile: dict[str, Any] | None
+    verifier_profile: dict[str, Any] | None
+    planning_profile: dict[str, Any] | None
+    agent: dict[str, Any] | None
+    distinct_models: bool
+    execution_available: bool
+    complete: bool

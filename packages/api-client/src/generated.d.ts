@@ -724,6 +724,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/llm-readiness": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Llm Readiness
+     * @description Report how far the model/agent chain is configured, for the setup wizard.
+     *
+     *     Everything here is read from the tables the operator already writes; nothing
+     *     is inferred or assumed. The four states the architecture keeps separate stay
+     *     separate here: a saved connection is not a working one, a successful
+     *     discovery is not a compatibility proof, and neither is execution, which
+     *     always reports unavailable because it depends on a root-owned qualification
+     *     the API cannot see.
+     */
+    get: operations["llm_readiness_api_v1_llm_readiness_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/model-profiles": {
     parameters: {
       query?: never;
@@ -1824,6 +1851,50 @@ export interface components {
       last_used_at: string | null;
       /** Last Source */
       last_source: string | null;
+    };
+    /**
+     * LlmReadinessOutput
+     * @description Derived setup state for the model/agent chain.
+     *
+     *     Every field is read from existing records. `execution_available` is a
+     *     constant false: execution depends on a root-owned qualification this API
+     *     cannot observe, so reporting it as anything else would be fabrication.
+     */
+    LlmReadinessOutput: {
+      /** Provider Network Enabled */
+      provider_network_enabled: boolean;
+      /** Connection */
+      connection: {
+        [key: string]: unknown;
+      } | null;
+      /** Connection Count */
+      connection_count: number;
+      /** Discovery */
+      discovery: {
+        [key: string]: unknown;
+      };
+      /** Implementation Profile */
+      implementation_profile: {
+        [key: string]: unknown;
+      } | null;
+      /** Verifier Profile */
+      verifier_profile: {
+        [key: string]: unknown;
+      } | null;
+      /** Planning Profile */
+      planning_profile: {
+        [key: string]: unknown;
+      } | null;
+      /** Agent */
+      agent: {
+        [key: string]: unknown;
+      } | null;
+      /** Distinct Models */
+      distinct_models: boolean;
+      /** Execution Available */
+      execution_available: boolean;
+      /** Complete */
+      complete: boolean;
     };
     /** Login */
     Login: {
@@ -4039,6 +4110,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  llm_readiness_api_v1_llm_readiness_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LlmReadinessOutput"];
         };
       };
     };

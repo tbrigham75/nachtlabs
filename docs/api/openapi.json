@@ -2183,6 +2183,28 @@
         }
       }
     },
+    "/api/v1/llm-readiness": {
+      "get": {
+        "tags": [
+          "Agents and models"
+        ],
+        "summary": "Llm Readiness",
+        "description": "Report how far the model/agent chain is configured, for the setup wizard.\n\nEverything here is read from the tables the operator already writes; nothing\nis inferred or assumed. The four states the architecture keeps separate stay\nseparate here: a saved connection is not a working one, a successful\ndiscovery is not a compatibility proof, and neither is execution, which\nalways reports unavailable because it depends on a root-owned qualification\nthe API cannot see.",
+        "operationId": "llm_readiness_api_v1_llm_readiness_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmReadinessOutput"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/model-profiles": {
       "get": {
         "tags": [
@@ -5480,6 +5502,111 @@
           "last_source"
         ],
         "title": "KeyOutput"
+      },
+      "LlmReadinessOutput": {
+        "properties": {
+          "provider_network_enabled": {
+            "type": "boolean",
+            "title": "Provider Network Enabled"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "connection_count": {
+            "type": "integer",
+            "title": "Connection Count"
+          },
+          "discovery": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Discovery"
+          },
+          "implementation_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Profile"
+          },
+          "verifier_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verifier Profile"
+          },
+          "planning_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Profile"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "distinct_models": {
+            "type": "boolean",
+            "title": "Distinct Models"
+          },
+          "execution_available": {
+            "type": "boolean",
+            "title": "Execution Available"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_network_enabled",
+          "connection",
+          "connection_count",
+          "discovery",
+          "implementation_profile",
+          "verifier_profile",
+          "planning_profile",
+          "agent",
+          "distinct_models",
+          "execution_available",
+          "complete"
+        ],
+        "title": "LlmReadinessOutput",
+        "description": "Derived setup state for the model/agent chain.\n\nEvery field is read from existing records. `execution_available` is a\nconstant false: execution depends on a root-owned qualification this API\ncannot observe, so reporting it as anything else would be fabrication."
       },
       "Login": {
         "properties": {

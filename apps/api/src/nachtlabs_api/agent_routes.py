@@ -1,3 +1,5 @@
+from datetime import timedelta
+from ipaddress import ip_address
 from typing import Any
 from uuid import UUID
 
@@ -6,11 +8,14 @@ from nachtlabs.access import project_access
 from nachtlabs.audit import record
 from nachtlabs.errors import require
 from nachtlabs.integrations.agents import capabilities
+from nachtlabs.integrations.service import network_allowed
 from nachtlabs.models import (
     AgentConfiguration,
     IntegrationConnection,
+    IntegrationProbe,
     ModelProfile,
     ProjectIntegration,
+    now,
 )
 from sqlalchemy import select
 
@@ -21,6 +26,7 @@ from nachtlabs_api.integration_schemas import (
     AgentOutput,
     BindingInput,
     BindingOutput,
+    LlmReadinessOutput,
     ProfileInput,
     ProfileOutput,
 )
@@ -69,6 +75,169 @@ def agent_view(value: AgentConfiguration) -> dict[str, Any]:
         "capabilities": capabilities(value.provider),
         "tested_version": None,
         "execution_available": None,
+    }
+
+
+@router.get("/llm-readiness", response_model=LlmReadinessOutput)
+def llm_readiness(actor: Actor, db: DB) -> dict[str, Any]:
+    """Report how far the model/agent chain is configured, for the setup wizard.
+
+    Everything here is read from the tables the operator already writes; nothing
+    is inferred or assumed. The four states the architecture keeps separate stay
+    separate here: a saved connection is not a working one, a successful
+    discovery is not a compatibility proof, and neither is execution, which
+    always reports unavailable because it depends on a root-owned qualification
+    the API cannot see.
+    """
+    actor.human_admin()
+    connections = list(
+        db.scalars(
+            select(IntegrationConnection)
+            .where(
+                IntegrationConnection.org_id == actor.org_id,
+                IntegrationConnection.provider == "ollama",
+            )
+            .order_by(IntegrationConnection.created_at)
+        )
+    )
+    profiles = list(
+        db.scalars(
+            select(ModelProfile)
+            .where(ModelProfile.org_id == actor.org_id)
+            .order_by(ModelProfile.created_at)
+        )
+    )
+    agents = list(
+        db.scalars(
+            select(AgentConfiguration)
+            .where(AgentConfiguration.org_id == actor.org_id)
+            .order_by(AgentConfiguration.created_at)
+        )
+    )
+
+    def freshest(value: IntegrationConnection) -> IntegrationProbe | None:
+        return db.scalar(
+            select(IntegrationProbe)
+            .where(IntegrationProbe.connection_id == value.id)
+            .order_by(IntegrationProbe.created_at.desc())
+            .limit(1)
+        )
+
+    def discovery_state(value: IntegrationConnection) -> str:
+        # Mirrors current_probe exactly, so the wizard and project binding can
+        # never disagree about whether a discovery still counts.
+        job = freshest(value)
+        if job is None:
+            return "not_run"
+        if job.connection_version != value.version:
+            return "stale"
+        if job.state != "succeeded":
+            return job.state
+        if job.finished_at is None or job.finished_at <= now() - timedelta(hours=24):
+            return "expired"
+        return "succeeded"
+
+    active = [c for c in connections if c.active]
+    # Prefer a connection that already has a current discovery, so an operator
+    # with several is not pushed back to the start.
+    chosen = next(
+        (c for c in active if discovery_state(c) == "succeeded"),
+        active[0] if active else (connections[0] if connections else None),
+    )
+    state = discovery_state(chosen) if chosen is not None else "not_run"
+    models: list[dict[str, Any]] = []
+    checked_at: str | None = None
+    if chosen is not None:
+        job = freshest(chosen)
+        if job is not None:
+            checked_at = job.created_at.isoformat()
+        if state == "succeeded" and job is not None:
+            rows = (job.result or {}).get("models") or []
+            models = [
+                {"name": str(row["name"]), "digest": row.get("digest")}
+                for row in rows
+                if isinstance(row, dict) and isinstance(row.get("name"), str)
+            ]
+
+    def by_role(role: str) -> dict[str, Any] | None:
+        found = next(
+            (
+                p
+                for p in profiles
+                if p.role == role and p.active and (chosen is None or p.connection_id == chosen.id)
+            ),
+            None,
+        )
+        return None if found is None else {"id": str(found.id), "model": found.model}
+
+    implementation = by_role("implementation")
+    verifier = by_role("verifier")
+    planning = by_role("planning")
+    # The binding rule compares the two profiles actually selected, so readiness
+    # asks whether such a pair exists rather than comparing one arbitrary pick.
+    # An operator may legitimately hold several profiles per role.
+    role_models = {
+        role: [
+            p.model
+            for p in profiles
+            if p.role == role and p.active and (chosen is None or p.connection_id == chosen.id)
+        ]
+        for role in ("implementation", "verifier")
+    }
+    distinct = any(i != v for i in role_models["implementation"] for v in role_models["verifier"])
+    bound = {p["id"] for p in (implementation, verifier) if p is not None}
+    agent = next(
+        (a for a in agents if a.active and str(a.model_profile_id) in bound),
+        None,
+    )
+
+    # Agent egress is refused for loopback by the root execution catalog, so a
+    # loopback pin configures discovery and planning but can never run an agent.
+    loopback = False
+    if chosen is not None:
+        for address in chosen.pinned_addresses:
+            try:
+                if ip_address(str(address)).is_loopback:
+                    loopback = True
+            except ValueError:
+                loopback = False
+
+    return {
+        "provider_network_enabled": network_allowed("ollama"),
+        "connection": None
+        if chosen is None
+        else {
+            "id": str(chosen.id),
+            "name": chosen.name,
+            "active": chosen.active,
+            "version": chosen.version,
+            "loopback_pinned": loopback,
+        },
+        "connection_count": len(connections),
+        "discovery": {"state": state, "models": models, "checked_at": checked_at},
+        "implementation_profile": implementation,
+        "verifier_profile": verifier,
+        "planning_profile": planning,
+        "agent": None
+        if agent is None
+        else {
+            "id": str(agent.id),
+            "name": agent.name,
+            "provider": agent.provider,
+            "executable": agent.executable,
+        },
+        "distinct_models": distinct,
+        # The API never infers executor qualification from configuration.
+        "execution_available": False,
+        "complete": bool(
+            chosen is not None
+            and chosen.active
+            and state == "succeeded"
+            and implementation is not None
+            and verifier is not None
+            and distinct
+            and agent is not None
+        ),
     }
 
 

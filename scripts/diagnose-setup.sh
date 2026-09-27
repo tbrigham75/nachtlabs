@@ -103,6 +103,12 @@ if [[ -f .env ]]; then
   if grep -qE '^NACHTLABS_SMTP_HOST=(""|'"''"'|)$' .env 2>/dev/null; then
     warn "SMTP is not configured; password reset and account invitations cannot be delivered"
   fi
+  # Said out loud rather than left to be discovered, because the symptom an
+  # operator meets is only "the wizard refused my endpoint" and the cause is
+  # four lines up in a file they may not have edited recently.
+  if grep -q '^NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true' .env 2>/dev/null; then
+    warn "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true; cleartext HTTP to a private provider is permitted, so model requests and model replies cross the network unprotected. A reverse proxy in front of a loopback provider keeps the same traffic off the wire."
+  fi
 fi
 
 head2 "Origin check (why a form can look dead)"

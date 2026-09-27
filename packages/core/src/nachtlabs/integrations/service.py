@@ -75,6 +75,7 @@ def probe_tick() -> None:
             connection.allow_private,
             connection.allow_http,
             connection.timeout_seconds,
+            get_settings().integration_allow_http_private,
         )
         encrypted = connection.credential
         record(

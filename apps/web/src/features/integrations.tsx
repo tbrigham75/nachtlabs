@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, write, type User } from "@nachtlabs/api-client";
+import { isCleartextOffHost } from "./endpoint-address";
 import {
   Action,
   Badge,
@@ -125,6 +126,16 @@ export function IntegrationsScreen({
                         ? c.latest_probe.state
                         : "Configuration changed"
                       : "Not run"}
+                  </Badge>
+                </li>
+                <li>
+                  Transport
+                  <Badge>
+                    {isCleartextOffHost(c.base_url, c.pinned_addresses)
+                      ? "Cleartext, unprotected"
+                      : c.base_url.startsWith("http://")
+                        ? "Loopback cleartext"
+                        : "TLS"}
                   </Badge>
                 </li>
                 <li>

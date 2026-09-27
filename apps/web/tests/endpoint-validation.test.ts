@@ -18,6 +18,7 @@ const ok = (over: Partial<EndpointInput> = {}): EndpointInput => ({
   pin: "192.168.1.50",
   allowPrivate: true,
   allowHttp: false,
+  allowPrivateHttp: false,
   ...over,
 });
 
@@ -49,15 +50,96 @@ describe("endpointProblems", () => {
     ).toEqual([]);
   });
 
-  it("explains that plain http only works for loopback", () => {
+  it("explains that plain http needs the switch when the address is private", () => {
     // The exact case that produced "Check the indicated fields".
     const problems = endpointProblems(
       ok({ baseUrl: "http://192.168.1.50:11434", allowHttp: true }),
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/Plain HTTP is only accepted for a loopback/);
+    expect(problems[0]).toMatch(
+      /does not permit cleartext to a private address/,
+    );
+    // The message has to name the remedy, or it is just a refusal.
+    expect(problems[0]).toContain("NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE");
     expect(problems[0]).toContain("https://");
     expect(problems[0]).toContain("192.168.1.50");
+  });
+
+  it("accepts cleartext to a private address once the switch is on", () => {
+    // Verified against the running API with the switch on: this returns 201.
+    expect(
+      endpointProblems(
+        ok({
+          baseUrl: "http://192.168.1.50:11434",
+          allowHttp: true,
+          allowPrivateHttp: true,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still refuses cleartext to a public address with the switch on", () => {
+    // The switch reaches the operator's own network and no further, and the
+    // client has to agree with the server about that rather than waving it past.
+    const problems = endpointProblems(
+      ok({
+        baseUrl: "http://93.184.216.34",
+        pin: "93.184.216.34",
+        allowPrivate: false,
+        allowHttp: true,
+        allowPrivateHttp: true,
+      }),
+    );
+    expect(problems.join(" ")).toMatch(/never permitted/);
+  });
+
+  it("still needs the http permission for a private address with the switch on", () => {
+    // The deployment switch and the connection's own gate are separate, and the
+    // message for this is the one about the http permission, not the new switch.
+    const problems = endpointProblems(
+      ok({
+        baseUrl: "http://192.168.1.50:11434",
+        allowHttp: false,
+        allowPrivateHttp: true,
+      }),
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/Permit HTTP/);
+  });
+
+  it("still needs the private permission for a private address with the switch on", () => {
+    const problems = endpointProblems(
+      ok({
+        baseUrl: "http://192.168.1.50:11434",
+        allowPrivate: false,
+        allowHttp: true,
+        allowPrivateHttp: true,
+      }),
+    );
+    expect(problems.join(" ")).toMatch(
+      /not publicly routable.*Permit this private or loopback address/s,
+    );
+  });
+
+  it("does not mention the switch for a loopback endpoint", () => {
+    // Loopback never needed it, so a loopback operator is not told to set an
+    // unrelated environment variable for a shape that already works. Asserted
+    // as an absence rather than as a clean result, because the http permission
+    // is still required for loopback and is a different complaint.
+    expect(
+      endpointProblems(
+        ok({
+          baseUrl: "http://127.0.0.1:11434",
+          pin: "127.0.0.1",
+          allowHttp: true,
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      endpointProblems(
+        ok({ baseUrl: "http://127.0.0.1:11434", pin: "127.0.0.1" }),
+      ).join(" "),
+    ).not.toMatch(/ALLOW_HTTP_PRIVATE/);
   });
 
   it("does not raise the http complaint when allow-http is already off", () => {

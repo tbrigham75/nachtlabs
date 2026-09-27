@@ -90,11 +90,32 @@ why it refused: pydantic's own reason is suppressed so submitted values cannot b
 echoed, which left a refused endpoint reading only as "Check the indicated
 fields" with no field named.
 
-Plain HTTP is accepted only for a loopback address. Any other address, including
-one on your own network, must be `https://`, and the transport has no fallback
-and never disables verification. A non-globally-routable address also needs
-"Permit this private or loopback address", which includes loopback, since
-`127.0.0.0/8` is not globally routable either.
+Plain HTTP is accepted for a loopback address, and for an address on your own
+network only when `NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true` is set in
+**both** `api.env` and `worker.env`, since the discovery check and the planning
+call each build their own connection. The transport has no fallback and never
+disables verification. A non-globally-routable address also needs "Permit this
+private or loopback address", which includes loopback, since `127.0.0.0/8` is
+not globally routable either.
+
+The switch is off by default and reaches your own network and no further: a
+publicly routable address still requires `https://` with the switch on. It
+changes only the scheme requirement, so the connection's own permissions, the
+single approved pin, the reserved and metadata address classes and the no-DNS
+rule are all unaffected.
+
+Cleartext costs more than confidentiality, and it is worth being exact about
+what is exposed. The request carries the work instruction, the Mission,
+Journeys, allowed paths, validation commands and repository metadata, and
+anything on the network path can read all of it. The reply is the part that
+matters more: it is parsed as the plan and becomes the recorded plan for a
+governed run, so with HTTPS forging it needs the server's certificate key, and
+here it needs only network position. The pinned address is the only thing
+between a run and the network. If the network is shared, put a reverse proxy in
+front of a loopback provider: the same endpoint configuration then works while
+the traffic stays on the host, which is the stronger arrangement and needs no
+switch. The wizard and the Integrations screen both say so on an endpoint that
+is configured this way, permanently rather than as a one-time confirmation.
 
 Because no DNS is ever resolved, the origin and the pin are independent: the
 origin supplies the `Host` header and the TLS name, and the pin is the numeric

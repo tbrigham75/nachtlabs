@@ -135,3 +135,19 @@ def test_the_same_host_on_two_ports_is_allowed(tmp_path: Path) -> None:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     )
+
+
+def test_cleartext_to_a_private_provider_is_off_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The field default, with the environment genuinely out of the way.
+
+    Both routes to a Settings instance read the environment, and this feature
+    asks operators to set a variable in it: a developer who has opted in locally
+    would otherwise fail this test and be told the default had changed. The
+    variable is removed rather than overridden, because overriding it would
+    assert the value that was passed in.
+    """
+    monkeypatch.delenv("NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE", raising=False)
+    assert build(tmp_path).integration_allow_http_private is False
+    assert build(tmp_path, integration_allow_http_private=True).integration_allow_http_private

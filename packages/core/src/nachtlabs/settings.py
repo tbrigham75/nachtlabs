@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     previous_master_keys_file: Path | None = None
     integration_network_enabled: bool = False
     git_provider_network_enabled: bool = False
+    # Permit cleartext HTTP to a provider on the operator's own network.
+    #
+    # Off by default, and loopback alone never needed it. Turning it on means
+    # the work request, Mission, Journeys, allowed paths, validation commands and
+    # repository metadata travel in the clear, and the model's reply becomes the
+    # recorded plan for a governed run, so anything on the network path can read
+    # that request and substitute its own answer. It never covers a publicly
+    # routable address, and it says nothing about agent execution, which the root
+    # execution catalog gates separately and more strictly.
+    integration_allow_http_private: bool = False
     integration_ca_file: Path | None = None
     bootstrap_token_file: Path | None = None
     # First-account creation is open by default so a fresh installation can be

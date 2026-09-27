@@ -15,6 +15,7 @@ import {
   ApiError,
   write,
   type LlmReadiness,
+  type SetupPreflight,
   type User,
 } from "@nachtlabs/api-client";
 import {
@@ -26,6 +27,12 @@ import {
   Loading,
   type Field,
 } from "@/components/ui";
+import {
+  isGlobalIp,
+  isLoopbackIp,
+  parseIp,
+  NEVER_PERMITTED,
+} from "./endpoint-address";
 import type { Connection, Probe } from "./integration-types";
 
 /*
@@ -93,6 +100,15 @@ export function LlmSetupScreen({ user }: { user: User }) {
     queryFn: () => api<Connection[]>("/integrations"),
     enabled: admin,
   });
+  // Shared cache key with the sign-in screen's own preflight query, so the two
+  // dedupe into one request. Only used here for the cleartext permission.
+  const preflight = useQuery({
+    queryKey: ["auth-preflight"],
+    queryFn: () => api<SetupPreflight>("/auth/preflight"),
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const allowPrivateHttp = preflight.data?.allow_http_private === true;
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ["llm-readiness"] });
     await client.invalidateQueries({ queryKey: ["integrations"] });
@@ -215,6 +231,28 @@ export function LlmSetupScreen({ user }: { user: User }) {
           executor qualification.
         </p>
       )}
+      {state.connection?.cleartext_endpoint && (
+        <p className="notice warning" role="status">
+          <strong>This endpoint is unprotected.</strong> It is cleartext, and it
+          is not a loopback address, so this is the case that needs the an
+          explicit decision rather than a default. Two things follow, and
+          neither is visible in the interface afterwards:
+          <br />
+          <br />
+          The work request, Mission, Journeys, allowed paths and validation
+          commands and repository metadata are sent to this address{" "}
+          <em>in the clear</em>, so anything on the network path can read them.
+          <br />
+          <br />
+          The reply from the model is parsed as the plan and becomes the
+          recorded plan for a governed run. With HTTPS, forging that needs the
+          certificate key of the server. Here it needs only network position,
+          and the pinned address is the only thing standing between a run and
+          the network. A reverse proxy in front of a loopback Ollama keeps the
+          traffic off the wire while still working, and is the stronger
+          arrangement if the network is shared.
+        </p>
+      )}
       {state.connection?.loopback_pinned && (
         <p className="notice warning" role="status">
           <strong>
@@ -248,6 +286,7 @@ export function LlmSetupScreen({ user }: { user: User }) {
       {active === "connection" && (
         <ConnectionStep
           existing={state.connection}
+          allowPrivateHttp={allowPrivateHttp}
           guard={guard}
           onDone={() => setStepAnd("discovery")}
         />
@@ -354,67 +393,9 @@ export type EndpointInput = {
   pin: string;
   allowPrivate: boolean;
   allowHttp: boolean;
+  /** Whether this installation permits cleartext to a private address. */
+  allowPrivateHttp: boolean;
 };
-
-/** Address classes the server refuses for the pin, whatever the permissions.
- * Kept in step with METADATA in integrations/transport.py. */
-const NEVER_PERMITTED = new Set([
-  "169.254.169.254",
-  "169.254.170.2",
-  "100.100.100.200",
-  "168.63.129.16",
-]);
-
-type Parsed = { text: string; version: 4 | 6; parts: number[] };
-
-function parseIp(value: string): Parsed | null {
-  const text = value.trim();
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
-  if (v4) {
-    const parts = v4.slice(1, 5).map(Number);
-    return parts.every((n) => n >= 0 && n <= 255)
-      ? { text, version: 4, parts }
-      : null;
-  }
-  // A deliberately conservative IPv6 shape check. The server is authoritative;
-  // this only has to recognise enough to classify the address, and anything it
-  // cannot classify is treated as not-loopback, which is the restrictive side.
-  if (
-    text.includes("%") ||
-    !text.includes(":") ||
-    !/^[0-9a-fA-F:]+$/.test(text)
-  ) {
-    return null;
-  }
-  return { text, version: 6, parts: [] };
-}
-
-function isLoopbackIp(ip: Parsed): boolean {
-  if (ip.version === 4) return ip.parts[0] === 127;
-  return ip.text === "::1" || ip.text === "0:0:0:0:0:0:0:1";
-}
-
-/**
- * Whether the address counts as publicly routable, which is the server's test
- * for whether the private permission is needed at all.
- *
- * The server asks ipaddress.is_global, so loopback needs the permission too,
- * even though it is the operator's own machine: the wizard's loopback defaults
- * turn it on for exactly that reason. Anything not recognised here is treated as
- * non-global, which is the restrictive side of the same coin.
- */
-function isGlobalIp(ip: Parsed): boolean {
-  if (ip.version === 6) return false;
-  const [a, b] = ip.parts;
-  if (a === 0 || a >= 224) return false; // unspecified, reserved, multicast
-  if (a === 127) return false; // loopback
-  if (a === 10) return false; // private
-  if (a === 172 && b >= 16 && b <= 31) return false; // private
-  if (a === 192 && b === 168) return false; // private
-  if (a === 169 && b === 254) return false; // link local
-  if (a === 100 && b >= 64 && b <= 127) return false; // carrier grade NAT
-  return true;
-}
 
 /**
  * Everything the server is certain to refuse, said in terms the operator can act
@@ -484,15 +465,25 @@ export function endpointProblems(input: EndpointInput): string[] {
   // accepts. An earlier version of this file keyed on the flag instead and
   // refused exactly the default https shape the wizard offers.
   if (raw.slice(0, raw.indexOf("://")).toLowerCase() === "http") {
-    if (!isLoopbackIp(pin)) {
-      problems.push(
-        `Plain HTTP is only accepted for a loopback address, and this one is ${input.pin.trim()}. Use https:// for it.`,
-      );
-    }
     if (!input.allowHttp) {
       problems.push(
         'Turn on "Permit HTTP for this loopback endpoint", or use https:// instead.',
       );
+    }
+    if (!isLoopbackIp(pin)) {
+      if (isGlobalIp(pin)) {
+        // The switch reaches the operator's own network and no further, so this
+        // is refused whatever is enabled.
+        problems.push(
+          `Plain HTTP to a publicly routable address is never permitted, and this one is ${input.pin.trim()}. Use https:// for it.`,
+        );
+      } else if (!input.allowPrivateHttp) {
+        problems.push(
+          input.allowPrivate
+            ? `This installation does not permit cleartext to a private address, and this one is ${input.pin.trim()}. Use https:// for it, or set NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true in api.env and worker.env and restart both.`
+            : `Plain HTTP is only accepted for a loopback address, and this one is ${input.pin.trim()}. Use https:// for it.`,
+        );
+      }
     }
   }
   return problems;
@@ -500,10 +491,12 @@ export function endpointProblems(input: EndpointInput): string[] {
 
 function ConnectionStep({
   existing,
+  allowPrivateHttp,
   guard,
   onDone,
 }: {
   existing: LlmReadiness["connection"];
+  allowPrivateHttp: boolean;
   guard: <T>(action: () => Promise<T>) => Promise<T>;
   onDone: () => void;
 }) {
@@ -514,7 +507,7 @@ function ConnectionStep({
       name: "base_url",
       label: "Model endpoint origin",
       required: true,
-      help: "Scheme, host and port only. Plain HTTP is accepted for a loopback address such as http://127.0.0.1:11434; any other address, including one on your own network, must be https://.",
+      help: "Scheme, host and port only. https:// works for any address. Plain HTTP works for a loopback address such as http://127.0.0.1:11434, and for an address on your own network only when the operator has enabled NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE.",
     },
     {
       name: "address",
@@ -531,7 +524,7 @@ function ConnectionStep({
       name: "allow_http",
       label: "Permit HTTP for this loopback endpoint",
       options: booleans,
-      help: "Only needed for a loopback address. Every other address requires HTTPS, and a cloud metadata destination is rejected outright.",
+      help: "Required for any cleartext endpoint. A publicly routable address still requires HTTPS even when cleartext to your own network is enabled, and a cloud metadata destination is always rejected.",
     },
     {
       name: "timeout_seconds",
@@ -574,6 +567,7 @@ function ConnectionStep({
             pin: v.address,
             allowPrivate: v.allow_private === "true",
             allowHttp: v.allow_http === "true",
+            allowPrivateHttp,
           });
           if (problems.length > 0) throw new Error(problems[0]);
           const connection = await guard(() =>

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from nachtlabs.integrations.contracts import ProviderError
 from nachtlabs.integrations.transport import Endpoint
+from nachtlabs.settings import get_settings
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from nachtlabs_api.schemas import Input
@@ -33,6 +34,7 @@ class ConnectionInput(Input):
                 self.allow_private,
                 self.allow_http,
                 self.timeout_seconds,
+                get_settings().integration_allow_http_private,
             ).validate()
         except ProviderError:
             raise ValueError("Provide an approved origin and a permitted pinned IP") from None

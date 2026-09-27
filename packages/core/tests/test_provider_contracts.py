@@ -91,6 +91,68 @@ def test_approved_loopback_and_private_tls() -> None:
     Endpoint("https://git.internal", ("10.0.0.5",), True).validate()
 
 
+@pytest.mark.parametrize(
+    "url,ip,private,private_http,accepts",
+    [
+        # Cleartext to a private address is refused unless the operator opted in.
+        # allow_http is on throughout, so the scheme is not what these turn on.
+        ("http://192.168.2.171:11434", "192.168.2.171", True, False, False),
+        ("http://10.0.0.5", "10.0.0.5", True, False, False),
+        ("http://[fe80::1]", "fe80::1", True, False, False),
+        # Opted in, and the address is not globally routable: accepted.
+        ("http://192.168.2.171:11434", "192.168.2.171", True, True, True),
+        ("http://10.0.0.5", "10.0.0.5", True, True, True),
+        ("http://172.16.4.9", "172.16.4.9", True, True, True),
+        ("http://ollama.internal:11434", "192.168.2.171", True, True, True),
+        # Opted in, and the address is publicly routable: still refused. The switch
+        # reaches the operator's own network and no further.
+        ("http://93.184.216.34", "93.184.216.34", False, True, False),
+        ("http://1.1.1.1", "1.1.1.1", True, True, False),
+        # Opted in does not substitute for the connection's own gates.
+        ("http://192.168.2.171:11434", "192.168.2.171", False, True, False),
+        ("http://192.168.2.171:11434", "192.168.2.171", True, False, False),
+    ],
+)
+def test_cleartext_to_a_private_address_is_opt_in_and_never_reaches_the_public_internet(
+    url: str, ip: str, private: bool, private_http: bool, accepts: bool
+) -> None:
+    # The flag is passed per endpoint rather than read from settings, so a test
+    # cannot inherit a permissive process-wide configuration.
+    if accepts:
+        Endpoint(url, (ip,), private, True, 15, private_http).validate()
+        return
+    with pytest.raises(ProviderError):
+        Endpoint(url, (ip,), private, True, 15, private_http).validate()
+
+
+def test_cleartext_flag_does_not_relax_the_single_explicit_pin() -> None:
+    # The opt-in is about the scheme, not about how far the address is trusted. A
+    # name that may resolve to more than the one approved pin is refused exactly
+    # as before, and waiving TLS does not change the number of addresses a name
+    # is allowed to have.
+    with pytest.raises(ProviderError):
+        Endpoint(
+            "http://ollama.internal:11434",
+            ("192.168.2.171", "192.168.2.172"),
+            True,
+            True,
+            15,
+            True,
+        ).validate()
+    # A name with the one approved pin is the accepted shape above; the pin still
+    # has to match the literal when the origin names the address itself.
+    with pytest.raises(ProviderError):
+        Endpoint("http://192.168.2.171:11434", ("192.168.2.172",), True, True, 15, True).validate()
+
+
+def test_cleartext_flag_does_not_reach_cloud_metadata_destinations() -> None:
+    # These were refused before the switch existed and are refused after it: the
+    # reserved-class check runs first and no flag reaches it.
+    for ip in ("169.254.169.254", "100.100.100.200", "0.0.0.0", "::ffff:127.0.0.1"):
+        with pytest.raises(ProviderError):
+            Endpoint("https://example.com", (ip,), True, True, 15, True).validate()
+
+
 def test_redirect_never_follows_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     import nachtlabs.integrations.transport as module
 

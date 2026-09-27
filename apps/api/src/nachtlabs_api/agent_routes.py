@@ -194,13 +194,21 @@ def llm_readiness(actor: Actor, db: DB) -> dict[str, Any]:
     # Agent egress is refused for loopback by the root execution catalog, so a
     # loopback pin configures discovery and planning but can never run an agent.
     loopback = False
+    # A cleartext endpoint to anything other than loopback: permitted only when
+    # the operator enabled it, and worth saying so wherever the endpoint is listed
+    # rather than only at the moment it was created.
+    cleartext = False
     if chosen is not None:
         for address in chosen.pinned_addresses:
             try:
-                if ip_address(str(address)).is_loopback:
-                    loopback = True
+                value = ip_address(str(address))
             except ValueError:
                 loopback = False
+                continue
+            if value.is_loopback:
+                loopback = True
+            if chosen.base_url.startswith("http://") and not value.is_loopback:
+                cleartext = True
 
     return {
         "provider_network_enabled": network_allowed("ollama"),
@@ -212,6 +220,7 @@ def llm_readiness(actor: Actor, db: DB) -> dict[str, Any]:
             "active": chosen.active,
             "version": chosen.version,
             "loopback_pinned": loopback,
+            "cleartext_endpoint": cleartext,
         },
         "connection_count": len(connections),
         "discovery": {"state": state, "models": models, "checked_at": checked_at},

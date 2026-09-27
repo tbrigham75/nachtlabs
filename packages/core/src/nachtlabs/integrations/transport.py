@@ -35,6 +35,11 @@ class Endpoint:
     allow_private: bool = False
     allow_http: bool = False
     timeout_seconds: int = 15
+    # Cleartext to a non-globally-routable address, which is otherwise refused.
+    # Passed in rather than read from settings so validate() stays pure and
+    # testable. Does not extend to publicly routable addresses, and does not
+    # speak for agent execution, which the execution catalog gates separately.
+    allow_private_http: bool = False
 
     def validate(self) -> None:
         try:
@@ -77,7 +82,16 @@ class Endpoint:
                     raise ValueError
                 if not ip.is_global and not self.allow_private:
                     raise ValueError
-                if parsed.scheme == "http" and not ip.is_loopback:
+                # Cleartext is allowed to loopback unconditionally, to a private
+                # address only when the operator opted in, and to a publicly
+                # routable address never: the switch reaches the operator's own
+                # network and no further. The unsafe address classes above and
+                # the explicit-pin and no-DNS rules are unaffected either way.
+                if (
+                    parsed.scheme == "http"
+                    and not ip.is_loopback
+                    and not (self.allow_private_http and not ip.is_global)
+                ):
                     raise ValueError
                 if literal is not None and literal != ip:
                     raise ValueError

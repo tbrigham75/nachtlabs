@@ -78,6 +78,8 @@ export interface SetupPreflight {
   origin_accepted: boolean;
   secure_cookies: boolean;
   setup_token_required: boolean;
+  /** Whether this installation permits cleartext HTTP to a private provider. */
+  allow_http_private: boolean;
   initialized: boolean;
   hint: string | null;
 }
@@ -95,6 +97,9 @@ export interface LlmReadiness {
     active: boolean;
     version: number;
     loopback_pinned: boolean;
+    /** Cleartext to a non-loopback address: the request and the model response
+     * both travel unprotected on the network. */
+    cleartext_endpoint: boolean;
   } | null;
   connection_count: number;
   discovery: {

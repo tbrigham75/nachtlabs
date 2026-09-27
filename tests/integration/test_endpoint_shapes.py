@@ -14,9 +14,16 @@ front-end test of the same name. Adding a rule means adding a row to both.
 
 import pytest
 from fastapi.testclient import TestClient
+from nachtlabs.settings import get_settings
 
 pytestmark = pytest.mark.integration
 
+# The table describes a default installation, where cleartext to a private
+# address is refused. NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE is a deployment
+# setting rather than part of the request shape, so it does not appear as a
+# column here: the rows below stay true whatever the deployment does, and the
+# opt-in is covered separately at the end of this file.
+#
 # (name, base_url, pin, allow_private, allow_http, accepted)
 SHAPES: list[tuple[str, str, list[str], bool, bool, bool]] = [
     # Accepted: the shape an operator on a LAN reaches for once it is https.
@@ -68,6 +75,23 @@ def connection(owner: TestClient, base_url: str, pin: str, private: bool, http: 
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_installation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold every test in this file to a default configuration unless it opts in.
+
+    The table describes what a default installation accepts, but the setting that
+    widens cleartext to a private address is read from the process environment.
+    An operator who has set it, which is what the setting is for, would otherwise
+    see the four cleartext rows fail: the test would be reporting the machine it
+    runs on rather than the contract it exists to pin. Tests that need the wider
+    behaviour set the variable themselves and clear the cache.
+    """
+    monkeypatch.delenv("NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE", raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.mark.parametrize(
     ("base_url", "pin", "private", "http", "accepted"),
     [row[1:] for row in SHAPES],
@@ -112,3 +136,67 @@ def test_a_refused_shape_creates_nothing(owner: TestClient) -> None:
     before = owner.get("/api/v1/integrations").json()
     connection(owner, "http://192.168.1.50:11434", "192.168.1.50", True, True)
     assert owner.get("/api/v1/integrations").json() == before
+
+
+@pytest.mark.parametrize(
+    ("base_url", "pin", "private", "http", "accepted"),
+    [
+        # With the switch on, the private cleartext shape the table above refuses
+        # is the one an operator on a LAN actually reaches for.
+        ("http://192.168.1.50:11434", "192.168.1.50", True, True, True),
+        ("http://ollama.lan:11434", "192.168.1.50", True, True, True),
+        # The switch is about the scheme. It does not reach the public internet.
+        ("http://93.184.216.34", "93.184.216.34", False, True, False),
+        # Nor does it substitute for the connection's own gates.
+        ("http://192.168.1.50:11434", "192.168.1.50", False, True, False),
+        ("http://192.168.1.50:11434", "192.168.1.50", True, False, False),
+        # Nor the pin, the reserved-address classes, or the origin shape.
+        ("http://192.168.1.50:11434", "192.168.1.99", True, True, False),
+        ("http://169.254.169.254", "169.254.169.254", True, True, False),
+        ("http://192.168.1.50:11434/api", "192.168.1.50", True, True, False),
+    ],
+    ids=[
+        "private cleartext on a lan address",
+        "private cleartext on a name",
+        "public cleartext is still refused",
+        "no private permission",
+        "no http permission",
+        "pin disagrees with origin",
+        "cloud metadata address",
+        "origin with a path",
+    ],
+)
+def test_the_deployment_switch_only_widens_cleartext_to_a_private_address(
+    owner: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    pin: str,
+    private: bool,
+    http: bool,
+    accepted: bool,
+) -> None:
+    monkeypatch.setenv("NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE", "true")
+    get_settings.cache_clear()
+    try:
+        response = connection(owner, base_url, pin, private, http)
+        if accepted:
+            assert response.status_code == 201, response.text
+        else:
+            assert response.status_code == 422, response.text
+    finally:
+        monkeypatch.undo()
+        get_settings.cache_clear()
+
+
+def test_the_default_configuration_refuses_a_private_cleartext_endpoint(
+    owner: TestClient,
+) -> None:
+    # The default is what makes the relaxation a decision rather than a behaviour.
+    # Asserted against the running API rather than against the settings object, so
+    # it still holds on a developer machine that has opted in locally, as this
+    # feature asks people to, and fails if the table above stops describing what a
+    # default installation actually does.
+    assert (
+        connection(owner, "http://192.168.1.50:11434", "192.168.1.50", True, True).status_code
+        == 422
+    )

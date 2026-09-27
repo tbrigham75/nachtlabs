@@ -147,6 +147,7 @@ def deliver(
             connection.allow_private,
             connection.allow_http,
             connection.timeout_seconds,
+            get_settings().integration_allow_http_private,
         )
         # Only trusted Git receives this credential. It never enters agent environment or args.
         token = credentials["token"]
@@ -187,6 +188,7 @@ def deliver(
         parsed.scheme + "://" + parsed.netloc,
         tuple(pins),
         bool(repository.get("remote_allow_private", False)),
+        allow_private_http=get_settings().integration_allow_http_private,
     ).validate()
     resolved_addresses = [
         ("[" + str(ipaddress.ip_address(address)) + "]") if ":" in address else address

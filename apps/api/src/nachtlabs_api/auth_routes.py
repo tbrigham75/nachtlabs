@@ -101,6 +101,10 @@ def preflight(request: Request, db: DB) -> dict[str, Any]:
         # session cookie cannot be marked Secure.
         "secure_cookies": settings.secure_cookies,
         "setup_token_required": settings.setup_token_required,
+        # Whether cleartext to a private provider is permitted at all. Reported so
+        # the interface can explain the rule instead of refusing a shape the
+        # operator has already enabled.
+        "allow_http_private": settings.integration_allow_http_private,
         "initialized": db.scalar(select(Organization.id)) is not None,
         "hint": None
         if accepted or seen is None

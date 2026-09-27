@@ -131,6 +131,7 @@ def plan_work(db: Session, run: Run, work: WorkRequest) -> None:
                 connection.allow_private,
                 connection.allow_http,
                 connection.timeout_seconds,
+                get_settings().integration_allow_http_private,
             ),
             headers,
             get_settings().integration_ca_file,

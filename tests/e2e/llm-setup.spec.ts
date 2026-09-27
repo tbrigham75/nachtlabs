@@ -41,7 +41,7 @@ type Readiness = typeof empty;
 async function mock(
   page: import("@playwright/test").Page,
   readiness: Partial<Readiness> = {},
-  options: { refuseWrite?: boolean } = {},
+  options: { refuseWrite?: boolean; allowHttpPrivate?: boolean } = {},
 ) {
   const posted: { path: string; body: unknown }[] = [];
   await page.route("**/api/v1/**", async (route) => {
@@ -58,6 +58,16 @@ async function mock(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(owner),
+      });
+    // The wizard reads the cleartext permission from here rather than assuming
+    // it, so a test has to be able to state both answers.
+    if (path.endsWith("/auth/preflight"))
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          allow_http_private: options.allowHttpPrivate === true,
+        }),
       });
     if (path.endsWith("/llm-readiness"))
       return route.fulfill({
@@ -192,6 +202,7 @@ test.describe("llm setup wizard", () => {
         active: true,
         version: 1,
         loopback_pinned: false,
+        cleartext_endpoint: false,
       },
       distinct_models: true,
       implementation_profile: { id: "p1", model: "a" },
@@ -221,6 +232,7 @@ test.describe("llm setup wizard", () => {
         active: true,
         version: 1,
         loopback_pinned: false,
+        cleartext_endpoint: false,
       },
     });
     await page.goto("/llm-setup");
@@ -245,6 +257,7 @@ test.describe("llm setup wizard", () => {
         active: true,
         version: 1,
         loopback_pinned: true,
+        cleartext_endpoint: false,
       },
     });
     await page.goto("/llm-setup");
@@ -263,6 +276,7 @@ test.describe("llm setup wizard", () => {
         active: true,
         version: 1,
         loopback_pinned: false,
+        cleartext_endpoint: false,
       },
       discovery: {
         state: "succeeded",
@@ -423,7 +437,7 @@ test.describe("connecting a remote model endpoint", () => {
     );
   });
 
-  test("the origin help states the loopback-only rule before anything is typed", async ({
+  test("the origin help states the cleartext rule before anything is typed", async ({
     page,
   }) => {
     // The rule used to live only in a different field's help text, which is how
@@ -433,5 +447,81 @@ test.describe("connecting a remote model endpoint", () => {
     const help = page.locator(".field", { hasText: "Model endpoint origin" });
     await expect(help).toContainText(/https:\/\//);
     await expect(help).toContainText(/loopback/);
+    // And the operator's own network is now a named case, not an omission.
+    await expect(help).toContainText(/ALLOW_HTTP_PRIVATE/);
+  });
+
+  test("cleartext to a private address is refused by default and named", async ({
+    page,
+  }) => {
+    // The permissions the form does offer, set, and the installation has not
+    // permitted cleartext. This is the shape an operator is most likely to
+    // reach for, so the message has to name the switch rather than the fact
+    // that the address is not loopback.
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByLabel(/Permit this private or loopback address/).check();
+    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    const error = page.locator("p.error");
+    await expect(error).toContainText(
+      /does not permit cleartext to a private address/,
+    );
+    await expect(error).toContainText(
+      "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE",
+    );
+    await expect(error).toContainText("https://");
+  });
+
+  test("the same endpoint is accepted once the installation permits cleartext", async ({
+    page,
+  }) => {
+    // The shape that used to be impossible. It has to work end to end, or the
+    // refusal above is the whole story and the setting does nothing.
+    await mock(page, {}, { allowHttpPrivate: true });
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByLabel(/Permit this private or loopback address/).check();
+    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.locator("p.error")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Request connection check" }),
+    ).toBeVisible();
+  });
+
+  test("cleartext to a public address is refused even when the switch is on", async ({
+    page,
+  }) => {
+    // The switch reaches the operator's own network and no further, and the
+    // client has to agree with the server about that or it waves past a shape
+    // the API will reject at save time.
+    await mock(page, {}, { allowHttpPrivate: true });
+    await mockProvider(page);
+    let posted = 0;
+    page.on("request", (r) => {
+      if (
+        r.method() !== "GET" &&
+        new URL(r.url()).pathname.endsWith("/integrations")
+      )
+        posted += 1;
+    });
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Model endpoint origin/).fill("http://93.184.216.34");
+    await page.getByLabel(/Pinned server IP/).fill("93.184.216.34");
+    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.locator("p.error")).toContainText(/never permitted/);
+    await page.waitForTimeout(600);
+    expect(posted).toBe(0);
   });
 });

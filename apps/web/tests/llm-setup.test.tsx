@@ -58,10 +58,17 @@ function readiness(over: Partial<LlmReadiness> = {}): LlmReadiness {
   };
 }
 
-function renderWizard(ready: LlmReadiness, user: User = owner) {
+function renderWizard(
+  ready: LlmReadiness,
+  user: User = owner,
+  preflight: { allow_http_private?: boolean } = {},
+) {
   api.mockImplementation(async (path: string) => {
     if (path === "/llm-readiness") return ready;
     if (path === "/integrations") return [];
+    if (path === "/auth/preflight")
+      return { allow_http_private: false, ...preflight };
+    if (path.endsWith("/probes")) return [];
     return {};
   });
   const client = new QueryClient({
@@ -78,6 +85,15 @@ beforeEach(() => {
   write.mockReset();
   api.mockReset();
 });
+
+const cleartext = {
+  id: "c1",
+  name: "LAN Ollama",
+  active: true,
+  version: 1,
+  loopback_pinned: false,
+  cleartext_endpoint: true,
+};
 
 describe("llm setup wizard", () => {
   it("is refused to non-admins", async () => {
@@ -99,6 +115,51 @@ describe("llm setup wizard", () => {
     expect(screen.getByRole("button", { name: "Save endpoint" })).toBeEnabled();
   });
 
+  it("warns permanently about a cleartext endpoint that is not loopback", async () => {
+    // The one thing the interface must not do is quietly accept a shape whose
+    // cost is invisible after the fact. Both directions of the exposure are
+    // named, because a request-only warning would miss the more serious half:
+    // the reply becomes the recorded plan for a governed run.
+    renderWizard(readiness({ connection: cleartext, connection_count: 1 }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("This endpoint is unprotected."),
+      ).toBeInTheDocument(),
+    );
+    const notice = screen
+      .getByText("This endpoint is unprotected.")
+      .closest("p")!;
+    expect(notice.textContent).toMatch(/in the clear/i);
+    expect(notice.textContent).toMatch(/recorded plan/);
+    // A proxy is the arrangement that keeps the traffic off the wire, so it is
+    // the useful half of the advice.
+    expect(notice.textContent).toMatch(/proxy/i);
+  });
+
+  it("does not warn about a loopback cleartext endpoint", async () => {
+    // Loopback traffic never crosses a network, so the same warning would be
+    // noise on the most common configuration there is.
+    renderWizard(
+      readiness({
+        connection: {
+          ...cleartext,
+          loopback_pinned: true,
+          cleartext_endpoint: false,
+        },
+        connection_count: 1,
+      }),
+    );
+    // The notice lives in the screen rather than in the connection form, so it
+    // is shown on whichever step is open. Wait for the step this fixture lands
+    // on and then check the notice is absent from it.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Request connection check" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("This endpoint is unprotected.")).toBeNull();
+  });
+
   it("resumes at discovery once an endpoint is saved", async () => {
     renderWizard(
       readiness({
@@ -108,6 +169,7 @@ describe("llm setup wizard", () => {
           active: true,
           version: 1,
           loopback_pinned: false,
+          cleartext_endpoint: false,
         },
         connection_count: 1,
       }),
@@ -128,6 +190,7 @@ describe("llm setup wizard", () => {
           active: true,
           version: 1,
           loopback_pinned: false,
+          cleartext_endpoint: false,
         },
         discovery: {
           state: "succeeded",
@@ -168,6 +231,7 @@ describe("llm setup wizard", () => {
           active: true,
           version: 1,
           loopback_pinned: false,
+          cleartext_endpoint: false,
         },
       }),
     );
@@ -194,6 +258,7 @@ describe("llm setup wizard", () => {
           active: true,
           version: 1,
           loopback_pinned: true,
+          cleartext_endpoint: false,
         },
       }),
     );
@@ -264,6 +329,7 @@ describe("llm setup wizard", () => {
           active: true,
           version: 1,
           loopback_pinned: false,
+          cleartext_endpoint: false,
         },
         discovery: {
           state: "succeeded",

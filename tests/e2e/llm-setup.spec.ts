@@ -312,7 +312,7 @@ test.describe("llm setup wizard", () => {
     await page.getByLabel(/Connection name/).fill("Home Ollama");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     await expect(page.getByLabel(/Current password/)).toBeVisible();
-    await expect(page.getByText(/confirmation expired/)).toBeVisible();
+    await expect(page.getByText(/last change was not/)).toBeVisible();
     await expect(page).toHaveURL(/\/llm-setup$/);
   });
 });

@@ -1,133 +1,78 @@
 #!/usr/bin/env bash
-# Return an installed deployment to pristine pre-first-run state.
-#
-# Destroys the database contents and the web build, then re-migrates and rebuilds
-# so the next page load must offer Owner setup. Credentials, the master key and
-# every service env file under /etc/nachtlabs are left untouched, so
-# configure.py does not need to run again and no secret is rotated.
+# Destructive operator reset of a stopped, reconciled installation.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
-
-FORCE=0
-[[ "${1:-}" == "--force" ]] && FORCE=1
-UNITS=(nachtlabs-api nachtlabs-worker nachtlabs-web)
-MIGRATION_ENV=/etc/nachtlabs/migration.env
+source "$NACHTLABS_ROOT/scripts/maintenance-common.sh"
 
 step() { printf '\n== %s ==\n' "$1"; }
-die()  { printf 'Refusing to continue: %s\n' "$1" >&2; exit 1; }
-
-# One database path only. The venv interpreter ships psycopg because the
-# application needs it, so there is nothing to detect and no second code path to
-# get wrong. An earlier version branched on psql and could silently produce
-# empty row counts.
-psql_query() {
-  "$ROOT_PYTHON" - "$CRED_URL" "$1" <<'PYTHON'
-import sys
-import psycopg
-with psycopg.connect(sys.argv[1].replace("postgresql+psycopg://", "postgresql://")) as db:
-    print(db.execute(sys.argv[2]).fetchone()[0])
-PYTHON
-}
-
-psql_exec() {
-  "$ROOT_PYTHON" - "$CRED_URL" <<'PYTHON'
-import sys
-import psycopg
-with psycopg.connect(
-    sys.argv[1].replace("postgresql+psycopg://", "postgresql://"), autocommit=True
-) as db:
-    db.execute("DROP SCHEMA public CASCADE")
-    db.execute("CREATE SCHEMA public")
-print("  schema emptied")
-PYTHON
-}
-
-# --- preflight, all of it before anything is touched -----------------------
+die() { printf 'Refusing to continue: %s\n' "$1" >&2; exit 1; }
+UNITS=(nachtlabs-api nachtlabs-worker nachtlabs-web)
+RESET_ARGS=()
+case "${1:-}" in
+  --force) RESET_ARGS=(--force) ;;
+  '') ;;
+  *) die "usage: reset-first-run.sh [--force]" ;;
+esac
 
 step "Preflight"
-[[ "$NACHTLABS_ROOT" == "/opt/nachtlabs" ]] || die "this target resets an installed deployment at /opt/nachtlabs, not '$NACHTLABS_ROOT'"
-[[ "$(id -u)" -eq 0 ]] || die "root is required to drop the database schema"
-[[ -n "$(git status --porcelain 2>/dev/null)" ]] && {
-  git status --short
-  die "the working tree is dirty; commit, stash or discard local edits first"
-}
-command -v systemctl >/dev/null || die "systemctl not found; this is an installed deployment only"
-systemctl list-unit-files nachtlabs-api.service >/dev/null 2>&1 || die "no nachtlabs-api.service unit found"
-
+[[ "$NACHTLABS_ROOT" == /opt/nachtlabs && "$EUID" -eq 0 ]] || die "run as root at /opt/nachtlabs"
+tree_status="$(git status --porcelain)" || die "cannot inspect the working tree"
+[[ -z "$tree_status" ]] || die "the working tree is dirty"
+lock_maintenance
+[[ ! -e /var/lib/nachtlabs-maintenance/update-pending ]] || die "recover the interrupted update first"
+for unit in "${UNITS[@]}"; do require_unit "$unit"; done
+lock_stopped_executor
 ROOT_PYTHON="$NACHTLABS_ROOT/.venv/bin/python"
-[[ -x "$ROOT_PYTHON" ]] || die "no interpreter at $ROOT_PYTHON; run make setup first"
-# Prove the rebuild can succeed before we delete the bundle it will replace.
+[[ -x "$ROOT_PYTHON" ]] || die "the installed Python environment is missing"
 require_build_toolchain
-
-[[ -r "$MIGRATION_ENV" ]] || die "cannot read $MIGRATION_ENV; run as an account that can read it"
-# shellcheck disable=SC1090
-set -a; source "$MIGRATION_ENV"; set +a
-CRED="${NACHTLABS_MIGRATION_DATABASE_URL_FILE:-}"
-[[ -r "$CRED" ]] || die "migration credential file '$CRED' is not readable"
-CRED_URL="$(cat "$CRED")"
+[[ -r /etc/nachtlabs/migration.env ]] || die "migration.env is not readable"
+set -a
+source /etc/nachtlabs/migration.env
+set +a
 
 step "What is currently stored"
-# Every one of these is destroyed below.
-ORG=$(psql_query "SELECT count(*) FROM organizations" 2>/dev/null || echo 0)
-USERS=$(psql_query "SELECT count(*) FROM users" 2>/dev/null || echo 0)
-RUNS=$(psql_query "SELECT count(*) FROM runs" 2>/dev/null || echo 0)
-EVID=$(psql_query "SELECT count(*) FROM run_evidence" 2>/dev/null || echo 0)
-AUDIT=$(psql_query "SELECT count(*) FROM audit_events" 2>/dev/null || echo 0)
-INVITES=$(psql_query "SELECT count(*) FROM identity_tokens" 2>/dev/null || echo 0)
-INTEG=$(psql_query "SELECT count(*) FROM integration_connections" 2>/dev/null || echo 0)
-printf '  organizations         : %s\n  users                 : %s\n  runs                  : %s\n  run evidence           : %s\n  audit events           : %s\n  identity tokens        : %s\n  integration connections: %s\n' \
-  "$ORG" "$USERS" "$RUNS" "$EVID" "$AUDIT" "$INVITES" "$INTEG"
-
-if [[ "$FORCE" -eq 0 && ( "$RUNS" != "0" || "$EVID" != "0" || "$INTEG" != "0" || "$AUDIT" -gt 2 ) ]]; then
-  printf '\nThis installation has recorded activity beyond a first account.\n' >&2
-  die "re-run with --force to discard runs, evidence, integrations and audit history"
-fi
-
-printf '\nThis permanently deletes every row in the database and the entire web build.\n'
-printf 'It does NOT touch /etc/nachtlabs: credentials, the master key and all\n'
-printf 'service env files are preserved, so no secret is rotated.\n'
-printf '\nType RESET to continue: '
+"$ROOT_PYTHON" scripts/maintenance_db.py inspect "${RESET_ARGS[@]}"
+printf '\nThis permanently deletes all database rows and rebuilds the web application.\n'
+printf 'Credentials and executor files are preserved. Type RESET to continue: '
 read -r reply
-[[ "$reply" == "RESET" ]] || die "cancelled"
+[[ "$reply" == RESET ]] || die "cancelled"
 
-# --- destructive, everything below this point is expected to change state ---
-
+phase=stopping
+on_exit() {
+  local code=$?
+  if [[ "$code" -ne 0 && "$phase" != complete ]]; then
+    if [[ "$phase" == startup ]]; then
+      if ! systemctl stop "${UNITS[@]}"; then
+        printf 'Service shutdown failed; inspect and stop remaining processes.\n' >&2
+      fi
+    fi
+    printf '\nReset failed during %s. Do not resume use until recovery is complete.\n' "$phase" >&2
+    printf 'Inspect the database, reapply migrations and grants if needed, then rebuild and health-check before restarting.\n' >&2
+  fi
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 step "Stopping services"
-systemctl stop "${UNITS[@]}" 2>/dev/null || true
-if systemctl is-active --quiet nachtlabs-executor 2>/dev/null; then
-  printf '%s\n' "WARNING: the executor is still running; stop it and reconcile before using it." >&2
-fi
-sleep 1
+systemctl stop "${UNITS[@]}"
+require_stopped "${UNITS[@]}" nachtlabs-executor
 
+phase=database-reset
 step "Emptying the database"
-psql_exec
+"$ROOT_PYTHON" scripts/maintenance_db.py reset "${RESET_ARGS[@]}"
+phase=migrations
+"$ROOT_PYTHON" -m alembic -c apps/api/alembic.ini upgrade head
+phase=permissions
+"$ROOT_PYTHON" scripts/maintenance_db.py grants
+"$ROOT_PYTHON" scripts/maintenance_db.py check-migrations
 
-step "Re-applying migrations"
-uv run --no-sync alembic -c apps/api/alembic.ini upgrade head >/dev/null
-printf '  schema at %s\n' "$(psql_query "SELECT version_num FROM alembic_version")"
-
-step "Discarding the web build"
-# Removing .next guarantees nothing stale can be served, which is the single
-# most common reason a first-run page appears not to update.
-rm -rf apps/web/.next
-printf '  removed apps/web/.next\n'
-
-step "Rebuilding"
-bash scripts/build.sh >/dev/null
-printf '  built\n'
-
-step "Starting services"
+phase=build
+# This is a fixed path below the verified installation root.
+rm -rf -- "$NACHTLABS_ROOT/apps/web/.next"
+bash scripts/build.sh
+phase=startup
 systemctl start "${UNITS[@]}"
 sleep 2
-failed=0
-for unit in "${UNITS[@]}"; do
-  state="$(systemctl is-active "$unit" 2>/dev/null | head -1 || echo failed)"
-  printf '  %-22s %s\n' "$unit" "$state"
-  [[ "$state" == "active" ]] || failed=1
-done
-[[ "$failed" -eq 0 ]] || die "a service is not active; check journalctl -u nachtlabs-api -n 50"
-
-printf '\nReset complete. This installation is now at zero accounts.\n'
-printf '  1. make diagnose-setup   (confirms the bundle is current and the origin is accepted)\n'
-printf '  2. open the origin in a private window\n'
-printf '  3. you must see "Initialize NachtLabs"; enter an email and the password twice\n'
+bash scripts/healthcheck.sh
+phase=complete
+printf '\nReset complete. Open the configured origin in a private window to create the first Owner.\n'

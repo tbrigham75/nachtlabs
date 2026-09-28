@@ -67,6 +67,9 @@ to check whether the served bundle is current and whether your origin is accepte
 
 To discard everything and return to a pre-first-run state, `sudo make reset-first-run`. It empties
 the database and the build but preserves the credentials and master key under `/etc/nachtlabs`.
+Stop and reconcile the executor first. Reset restores runtime database permissions before startup.
+Updates prepare a separate build before downtime and retain a recovery copy if activation fails;
+see [upgrade and recovery](docs/operations/upgrade-and-recovery.md).
 
 If the first-run form appears but submitting it does nothing, your browser's origin almost certainly
 does not match `NACHTLABS_PUBLIC_URL`; `make diagnose-setup` reports the exact mismatch.

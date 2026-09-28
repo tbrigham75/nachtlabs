@@ -23,6 +23,7 @@ import {
   Badge,
   ErrorNotice,
   Form,
+  FormInterruption,
   Heading,
   Loading,
   type Field,
@@ -90,10 +91,16 @@ export function LlmSetupScreen({ user }: { user: User }) {
   const [step, setStep] = useState<Step | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [expired, setExpired] = useState(false);
+  const [resumeStep, setResumeStep] = useState<Step | null>(null);
   const ready = useQuery({
     queryKey: ["llm-readiness"],
     queryFn: () => api<LlmReadiness>("/llm-readiness"),
     enabled: admin,
+    refetchInterval: (query) =>
+      step === "discovery" ||
+      ["pending", "running"].includes(query.state.data?.discovery.state ?? "")
+        ? 5000
+        : false,
   });
   const connections = useQuery({
     queryKey: ["integrations"],
@@ -120,14 +127,14 @@ export function LlmSetupScreen({ user }: { user: User }) {
       <ErrorNotice error={new Error("Owner or Admin access is required")} />
     );
   if (ready.isPending) return <Loading />;
-  if (ready.error) return <ErrorNotice error={ready.error} />;
+  if (ready.error && !ready.data) return <ErrorNotice error={ready.error} />;
 
   const state = ready.data!;
   const active = step ?? firstIncompleteStep(state);
   const index = steps.findIndex((s) => s.id === active);
   const setStepAnd = async (next: Step) => {
-    setStep(next);
     await refresh();
+    setStep(next);
   };
   /*
     A sign-in already opens a ten-minute write window, so demanding a password
@@ -135,9 +142,11 @@ export function LlmSetupScreen({ user }: { user: User }) {
     window can lapse mid-flow, and a bare 403 there would dead-end the wizard
     with the form contents lost and no route forward. Every write goes through
     this instead: on expiry it moves to the confirmation step, which then
-    resumes at the first step that still needs work.
+    resumes at the interrupted step with its draft still mounted.
   */
   const guard = async <T,>(action: () => Promise<T>): Promise<T> => {
+    // Pin the current step before invalidation changes the derived readiness.
+    setStep(active);
     try {
       return await action();
     } catch (error) {
@@ -165,9 +174,11 @@ export function LlmSetupScreen({ user }: { user: User }) {
         );
       }
       if (error instanceof ApiError && error.code === "reauth_required") {
+        setResumeStep(active);
+        setConfirmed(false);
         setStep("confirm");
         setExpired(true);
-        throw new Error(
+        throw new FormInterruption(
           "Your ten-minute confirmation expired. Confirm your identity to carry on; this step will still be waiting.",
         );
       }
@@ -274,35 +285,55 @@ export function LlmSetupScreen({ user }: { user: User }) {
         </p>
       )}
       <ErrorNotice error={connections.error} />
+      <ErrorNotice error={ready.error} />
       {active === "confirm" && (
         <ConfirmStep
           confirmed={confirmed}
           onConfirmed={async () => {
             setConfirmed(true);
-            await setStepAnd(firstIncompleteStep(state));
+            setExpired(false);
+            await setStepAnd(resumeStep ?? firstIncompleteStep(state));
+            setResumeStep(null);
           }}
         />
       )}
-      {active === "connection" && (
-        <ConnectionStep
-          existing={state.connection}
-          allowPrivateHttp={allowPrivateHttp}
-          guard={guard}
-          onDone={() => setStepAnd("discovery")}
-        />
+      {/* Keep non-secret drafts mounted while identity is reconfirmed. */}
+      {(active === "connection" || resumeStep === "connection") && (
+        <div hidden={active !== "connection"}>
+          <ConnectionStep
+            existing={state.connection}
+            allowPrivateHttp={allowPrivateHttp}
+            guard={guard}
+            onDone={() => setStepAnd("discovery")}
+          />
+        </div>
       )}
       {active === "discovery" && (
-        <DiscoveryStep state={state} guard={guard} onDone={refresh} />
-      )}
-      {active === "profiles" && (
-        <ProfilesStep
+        <DiscoveryStep
           state={state}
           guard={guard}
-          onDone={() => setStepAnd("agent")}
+          onDone={refresh}
+          onContinue={() => setStepAnd("profiles")}
         />
       )}
-      {active === "agent" && (
-        <AgentStep state={state} guard={guard} onDone={refresh} />
+      {(active === "profiles" || resumeStep === "profiles") && (
+        <div hidden={active !== "profiles"}>
+          <ProfilesStep
+            state={state}
+            guard={guard}
+            onSaved={refresh}
+            onDone={() => setStepAnd("agent")}
+          />
+        </div>
+      )}
+      {(active === "agent" || resumeStep === "agent") && (
+        <div hidden={active !== "agent"}>
+          <AgentStep
+            state={state}
+            guard={guard}
+            onDone={() => setStepAnd("done")}
+          />
+        </div>
       )}
       {active === "done" && <Summary state={state} step={index} />}
       <p className="notice">
@@ -607,10 +638,12 @@ function DiscoveryStep({
   state,
   guard,
   onDone,
+  onContinue,
 }: {
   state: LlmReadiness;
   guard: <T>(action: () => Promise<T>) => Promise<T>;
   onDone: () => Promise<void>;
+  onContinue: () => Promise<void>;
 }) {
   const client = useQueryClient();
   const probes = useQuery({
@@ -716,6 +749,9 @@ function DiscoveryStep({
             ones: implementation and verification must not share a model.
           </p>
         )}
+      {state.discovery.state === "succeeded" && (
+        <Action action={onContinue}>Continue to model profiles</Action>
+      )}
     </StepPanel>
   );
 }
@@ -724,19 +760,24 @@ function ProfilesStep({
   state,
   guard,
   onDone,
+  onSaved,
 }: {
   state: LlmReadiness;
   guard: <T>(action: () => Promise<T>) => Promise<T>;
   onDone: () => void;
+  onSaved: () => Promise<void>;
 }) {
   const [saved, setSaved] = useState<string[]>([]);
+  const connection = state.connection;
+  if (!connection?.active)
+    return <p className="notice error">Create an active model endpoint first.</p>;
   const known = state.discovery.models.map((m) => m.name);
   const makeModels = (role: string, current: string) => {
     const options = known.length
       ? known.map((m) => ({ value: m, label: m }))
       : [{ value: current, label: current }];
     return {
-      connection_id: state.connection!.id,
+      connection_id: connection.id,
       role,
       model: options[0]?.value ?? "",
       options,
@@ -750,15 +791,13 @@ function ProfilesStep({
       icon={CircleDashed}
       note="A profile binds a role to one exact model identifier and a temperature. Implementation and verification are separate roles and, by default, must not resolve to the same model, so that a verifier is not simply the implementer agreeing with itself."
     >
-      {!state.connection ? (
-        <p className="notice error">Create a model endpoint first.</p>
-      ) : state.discovery.state !== "succeeded" ? (
+      {state.discovery.state !== "succeeded" && (
         <p className="notice warning">
           No current discovery is available, so there is no verified list to
           choose from. Run the connection check first; you can still enter an
           exact identifier by hand, but nothing will confirm it exists.
         </p>
-      ) : null}
+      )}
       {(["implementation", "verifier"] as const).map((role) => {
         const existing = role === "implementation" ? implementation : verifier;
         const other = role === "implementation" ? verifier : implementation;
@@ -816,6 +855,10 @@ function ProfilesStep({
                 }}
                 label={`Create ${role} profile`}
                 submit={async (v) => {
+                  if (v.model === other?.model)
+                    throw new Error(
+                      "Choose different models for implementation and verification.",
+                    );
                   await guard(() =>
                     write("/model-profiles", {
                       name: v.name,
@@ -828,6 +871,7 @@ function ProfilesStep({
                     }),
                   );
                   setSaved((s) => [...s, role]);
+                  await onSaved();
                 }}
               />
             )}
@@ -837,12 +881,22 @@ function ProfilesStep({
       <div className="actions">
         <button
           className="primary"
-          disabled={implementation === null || verifier === null}
+          disabled={
+            implementation === null ||
+            verifier === null ||
+            !state.distinct_models
+          }
           onClick={onDone}
         >
           Continue to coding agent
         </button>
       </div>
+      {implementation && verifier && !state.distinct_models && (
+        <p className="notice warning">
+          Choose different implementation and verification models in Agents
+          &amp; models.
+        </p>
+      )}
       {(implementation === null || verifier === null) && (
         <p className="notice">
           Both profiles are required. The button stays disabled until each one
@@ -875,6 +929,7 @@ function AgentStep({
           already bound at <code>{state.agent.executable}</code>. Edit it from{" "}
           <Link href="/agents-models">Agents &amp; models</Link>.
         </p>
+        <Action action={onDone}>Show the summary</Action>
       </StepPanel>
     );
   return (
@@ -1013,8 +1068,11 @@ function Summary({ state, step }: { state: LlmReadiness; step: number }) {
         </li>
       </ul>
       <p className="notice">
-        Step {step + 1} of {steps.length}. Configuration is complete, but
-        nothing runs yet. Execution needs a root-owned qualification the
+        Step {step + 1} of {steps.length}.{" "}
+        {state.complete
+          ? "Configuration is complete, but nothing runs yet. "
+          : "Configuration is incomplete. Finish the outstanding steps above. "}
+        Execution needs a root-owned qualification the
         interface cannot perform: follow{" "}
         <code>docs/operations/executor-qualification.md</code>, record it with{" "}
         <code>

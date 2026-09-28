@@ -1,6 +1,12 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, type LlmReadiness, type User } from "@nachtlabs/api-client";
 
@@ -64,7 +70,7 @@ function renderWizard(
   preflight: { allow_http_private?: boolean } = {},
 ) {
   api.mockImplementation(async (path: string) => {
-    if (path === "/llm-readiness") return ready;
+    if (path === "/llm-readiness") return structuredClone(ready);
     if (path === "/integrations") return [];
     if (path === "/auth/preflight")
       return { allow_http_private: false, ...preflight };
@@ -316,7 +322,7 @@ describe("llm setup wizard", () => {
     await waitFor(() =>
       expect(screen.getByLabelText(/Current password/)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/confirmation expired/)).toBeInTheDocument();
+    expect(screen.getByText(/last change was not/)).toBeVisible();
   });
 
   it("offers distinct models for implementation and verification", async () => {
@@ -350,5 +356,137 @@ describe("llm setup wizard", () => {
     expect(
       screen.getByRole("button", { name: "Continue to coding agent" }),
     ).toBeDisabled();
+  });
+});
+
+describe("setup transitions", () => {
+  const endpoint = {
+    id: "c1",
+    name: "Ollama",
+    active: true,
+    version: 1,
+    loopback_pinned: true,
+    cleartext_endpoint: false,
+  };
+  const discovered: LlmReadiness["discovery"] = {
+    state: "succeeded",
+    models: [
+      { name: "coder", digest: null },
+      { name: "reviewer", digest: null },
+    ],
+    checked_at: "2026-09-28T12:00:00Z",
+  };
+
+  it("allows every tab on an empty installation without claiming completion", async () => {
+    renderWizard(readiness());
+    await screen.findByRole("button", { name: "Save endpoint" });
+    for (const title of [
+      "Confirm identity",
+      "Model endpoint",
+      "Connection check",
+      "Model profiles",
+      "Coding agent",
+      "Summary",
+    ]) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: new RegExp(`^[1-6]\\. ${title}$`),
+        }),
+      );
+    }
+    expect(screen.getByText(/Configuration is incomplete/)).toBeVisible();
+    expect(screen.queryByText(/Configuration is complete/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "4. Model profiles" }),
+    );
+    expect(
+      screen.getByText("Create an active model endpoint first."),
+    ).toBeVisible();
+  });
+
+  it("completes endpoint, discovery, profiles and agent without reloading", async () => {
+    const ready = readiness();
+    renderWizard(ready);
+    write.mockImplementation(async (path: string, body: Record<string, unknown>) => {
+      if (path === "/integrations") {
+        ready.connection = endpoint;
+        ready.connection_count = 1;
+        return { id: "c1" };
+      }
+      if (path.endsWith("/probes")) {
+        ready.discovery = { state: "pending", models: [], checked_at: null };
+        return { id: "probe1" };
+      }
+      if (path === "/model-profiles") {
+        const profile = { id: String(body.role), model: String(body.model) };
+        if (body.role === "implementation") ready.implementation_profile = profile;
+        else ready.verifier_profile = profile;
+        ready.distinct_models =
+          !!ready.implementation_profile &&
+          !!ready.verifier_profile &&
+          ready.implementation_profile.model !== ready.verifier_profile.model;
+        return profile;
+      }
+      if (path === "/agents") {
+        ready.agent = {
+          id: "agent1",
+          name: "Hermes",
+          provider: "hermes",
+          executable: "/usr/local/bin/hermes",
+        };
+        ready.complete = true;
+        return ready.agent;
+      }
+      throw new Error(`Unexpected write: ${path}`);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Save endpoint" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue to connection check" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Continue to connection check" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Request connection check" }));
+    await screen.findByText("Queued");
+    ready.discovery = discovered;
+    fireEvent.click(await screen.findByRole("button", { name: "Continue to model profiles" }, { timeout: 6500 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create implementation profile" }));
+    await screen.findByText(/Already configured as/);
+    const verifier = screen.getByRole("button", { name: "Create verifier profile" }).closest("form")!;
+    fireEvent.change(within(verifier).getByLabelText(/^Model/), { target: { value: "reviewer" } });
+    fireEvent.submit(verifier);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue to coding agent" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Continue to coding agent" }));
+    fireEvent.change(await screen.findByLabelText(/Expected installed version/), { target: { value: "1.2.3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show the summary" }));
+    expect(await screen.findByText(/Configuration is complete/)).toBeVisible();
+    expect(screen.getByText("Requires operator qualification")).toBeVisible();
+  }, 12000);
+
+  it("refuses a duplicate verifier model before writing it", async () => {
+    renderWizard(readiness({ connection: endpoint, discovery: discovered,
+      implementation_profile: { id: "p1", model: "coder" } }));
+    const button = await screen.findByRole("button", { name: "Create verifier profile" });
+    const form = button.closest("form")!;
+    fireEvent.change(within(form).getByLabelText(/^Model/), { target: { value: "coder" } });
+    fireEvent.submit(form);
+    expect(await screen.findByText("Choose different models for implementation and verification.")).toBeVisible();
+    expect(write).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Continue to coding agent" })).toBeDisabled();
+  });
+
+  it("preserves the interrupted draft through two confirmation expiries", async () => {
+    renderWizard(readiness());
+    write.mockImplementation(async (path: string) => {
+      if (path === "/auth/reauthenticate") return {};
+      throw new ApiError(403, "reauth_required", "Confirm identity");
+    });
+    fireEvent.change(await screen.findByLabelText(/Connection name/), { target: { value: "My draft endpoint" } });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Save endpoint" }));
+      fireEvent.change(await screen.findByLabelText(/Current password/), { target: { value: "my-password" } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm identity" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Save endpoint" })).toBeVisible());
+      expect(screen.getByLabelText(/Connection name/)).toHaveValue("My draft endpoint");
+      expect(screen.queryByText(/last change was not/)).toBeNull();
+    }
+    expect(write.mock.calls.filter(([path]) => path === "/auth/reauthenticate")).toHaveLength(2);
   });
 });

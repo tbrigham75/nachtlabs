@@ -1,115 +1,135 @@
 #!/usr/bin/env bash
-# Routine operator update of an installed NachtLabs release.
-#
-# install-systemd.sh deliberately does not build, so `git pull` alone changes
-# nothing an operator can see. This performs the whole sequence in order and
-# refuses to start from an unsafe state.
+# Prepare a release beside the live checkout, then promote it in a stopped window.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
-
-ASSUME_YES=0
-[[ "${1:-}" == "--yes" ]] && ASSUME_YES=1
-
-UNITS=(nachtlabs-api nachtlabs-worker nachtlabs-web)
-have_systemd=0
-if command -v systemctl >/dev/null && systemctl list-unit-files nachtlabs-api.service >/dev/null 2>&1; then
-  have_systemd=1
-fi
+source "$NACHTLABS_ROOT/scripts/maintenance-common.sh"
 
 step() { printf '\n== %s ==\n' "$1"; }
 die() { printf 'Refusing to continue: %s\n' "$1" >&2; exit 1; }
-
-# --- guards -----------------------------------------------------------------
+UNITS=(nachtlabs-api nachtlabs-worker nachtlabs-web)
+ASSUME_YES=0
+case "${1:-}" in
+  --yes) ASSUME_YES=1 ;;
+  '') ;;
+  *) die "usage: update.sh [--yes]" ;;
+esac
 
 step "Preflight"
-printf 'current commit : %s\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-printf 'branch         : %s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-
-# Local edits inside the installed source are never discarded by an update.
-if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-  printf '\nUncommitted local changes:\n'
-  git status --short
-  die "the working tree is dirty; commit, stash or discard them first (an update will not clobber local edits)"
-fi
-
-if [[ "$have_systemd" -eq 0 ]]; then
-  die "no systemd unit for nachtlabs-api.service was found; this target is for installed deployments, not a development checkout"
-fi
-
-# The services are stopped and the bundle rebuilt below, so prove the toolchain
-# can produce a replacement while the current one is still in place. A build
-# that cannot succeed must not begin by tearing down what already works.
+[[ "$NACHTLABS_ROOT" == /opt/nachtlabs && "$EUID" -eq 0 ]] || die "run as root at /opt/nachtlabs"
+lock_maintenance
+PENDING=/var/lib/nachtlabs-maintenance/update-pending
+[[ ! -e "$PENDING" ]] || die "an update was interrupted; run sudo bash $PENDING/recover-update.sh"
+tree_status="$(git status --porcelain)" || die "cannot inspect the working tree"
+[[ -z "$tree_status" ]] || die "the working tree is dirty"
+for unit in "${UNITS[@]}"; do require_unit "$unit"; done
 require_build_toolchain
-
-# An executor job mid-flight may be holding uncommitted candidate state.
-if [[ -S /var/run/nachtlabs-executor/broker.sock ]] || pgrep -f "nachtlabs.execution.broker" >/dev/null 2>&1; then
-  die "an executor broker is running; stop and reconcile it before updating (see docs/operations/upgrade-and-recovery.md)"
-fi
-
-for unit in "${UNITS[@]}"; do
-  printf 'service %-22s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || echo unknown)"
-done
-
-if [[ "$ASSUME_YES" -eq 0 ]]; then
-  printf '\nThis will stop %s, pull, rebuild, and restart them.\n' "${UNITS[*]}"
-  read -r -p 'Type yes to continue: ' reply
-  [[ "$reply" == "yes" ]] || die "cancelled"
-fi
-
-# --- update -----------------------------------------------------------------
-
-step "Stopping services"
-systemctl stop "${UNITS[@]}" 2>/dev/null || true
-sleep 1
-
-step "Fetching the target revision"
-git fetch --all --tags
+lock_stopped_executor
+load_env
+: "${NACHTLABS_MIGRATION_DATABASE_URL_FILE:?Migration credential file is required}"
+ROOT_PYTHON="$NACHTLABS_ROOT/.venv/bin/python"
+[[ -x "$ROOT_PYTHON" ]] || die "the installed Python environment is missing"
+"$ROOT_PYTHON" scripts/maintenance_db.py reconciled
 before="$(git rev-parse HEAD)"
-git pull --ff-only
-after="$(git rev-parse HEAD)"
-if [[ "$before" == "$after" ]]; then
-  printf 'Already up to date at %s. Rebuilding anyway so the bundle matches the source.\n' "$after"
-else
-  printf 'Advanced %s..%s\n' "$(git rev-parse --short "$before")" "$(git rev-parse --short "$after")"
+branch="$(git symbolic-ref --short HEAD)" || die "check out the installed branch first"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" || die "the installed branch has no upstream"
+
+step "Fetching the target revision (services remain available)"
+git fetch --all --tags
+target="$(git rev-parse "$upstream^{commit}")"
+git merge-base --is-ancestor "$before" "$target" || die "the update is not a fast-forward"
+stage="$(mktemp -d /opt/nachtlabs-update.XXXXXXXX)"
+chmod 0755 "$stage"
+printf 'Preparation directory: %s\n' "$stage"
+git archive "$target" | tar -x -C "$stage"
+# Use the installed helper to compare the actual database with the target files.
+# A pulled commit or repeated invocation cannot stand in for database state.
+"$ROOT_PYTHON" scripts/maintenance_db.py check-migrations --root "$stage"
+
+step "Preparing dependencies and web build"
+# No running interpreter or bundle is modified here. Warm the Python cache too;
+# the staged venv is never copied because its editable paths belong to stage.
+UV_PROJECT_ENVIRONMENT="$stage/.venv" UV_PYTHON=/usr/bin/python3.12 UV_NO_MANAGED_PYTHON=1 \
+  uv sync --project "$stage" --locked --all-packages
+(
+  cd "$stage"
+  pnpm install --frozen-lockfile
+  bash scripts/build.sh
+)
+tree_status="$(git status --porcelain)" || die "cannot inspect the working tree"
+[[ "$(git rev-parse HEAD)" == "$before" && -z "$tree_status" && "$(git symbolic-ref --short HEAD)" == "$branch" ]] || die "the installed tree changed during preparation"
+"$ROOT_PYTHON" scripts/maintenance_db.py check-migrations --root "$stage"
+if [[ "$ASSUME_YES" -eq 0 ]]; then
+  printf '\nPrepared %s. Stop services, save a recovery copy, and activate it? Type yes: ' "$target"
+  read -r reply
+  [[ "$reply" == yes ]] || die "cancelled; live release is unchanged"
 fi
+tree_status="$(git status --porcelain)" || die "cannot inspect the working tree"
+[[ "$(git rev-parse HEAD)" == "$before" && -z "$tree_status" && "$(git symbolic-ref --short HEAD)" == "$branch" ]] || die "the installed tree changed while awaiting confirmation"
 
-step "Resolving dependencies"
-# --locked proves the committed lockfiles still describe a resolvable tree.
-uv sync --locked --all-packages
-pnpm install --frozen-lockfile
-
-step "Building"
-# scripts/build.sh, not a bare `pnpm build`: the standalone output does not
-# contain .next/static unless it is copied, and the web unit serves from there.
-bash scripts/build.sh
-
-step "Checking for a pending migration"
-# Compare the applied revision with the repository head. Only a new revision
-# justifies touching the database during an otherwise code-only update.
-revisions="$(git diff --name-only "$before" "$after" -- apps/api/migrations/versions 2>/dev/null || true)"
-if [[ -n "$revisions" ]]; then
-  printf 'Migration changes in this range:\n%s\n\n' "$revisions"
-  printf '%s\n' 'Review the new revision, then apply it with migrator credentials:'
-  printf '  %s\n' '  sudo -u nachtlabs_migrator make migrate'
-  die "apply the migration deliberately; this update will not modify the database for you"
-fi
-printf 'No migration changes in this range.\n'
-
-step "Starting services"
-systemctl start "${UNITS[@]}"
-
-step "Health"
-sleep 2
-failed=0
+# A root-only recovery directory persists across SIGKILL and host restart.
+# The saved recovery script does not depend on the release being activated.
+backup="$(mktemp -d /var/lib/nachtlabs-maintenance/update.XXXXXXXX)"
+cp scripts/recover-update.sh scripts/maintenance-common.sh scripts/maintenance_db.py "$backup/"
+printf '%s\n' "$before" > "$backup/source.commit"
+printf '%s\n' "$target" > "$backup/target.commit"
+printf '%s\n' "$NACHTLABS_MIGRATION_DATABASE_URL_FILE" > "$backup/migration-credential-file"
+: > "$backup/active-units"
 for unit in "${UNITS[@]}"; do
-  state="$(systemctl is-active "$unit" 2>/dev/null || echo failed)"
-  printf 'service %-22s %s\n' "$unit" "$state"
-  [[ "$state" == "active" ]] || failed=1
+  state="$(systemctl show "$unit" --property=ActiveState --value)"
+  case "$state" in
+    active) printf '%s\n' "$unit" >> "$backup/active-units" ;;
+    inactive|failed) ;;
+    *) die "$unit is transitioning; wait before updating" ;;
+  esac
 done
-if [[ "$failed" -ne 0 ]]; then
-  printf '\nA service is not active. Check:\n  journalctl -u nachtlabs-api -n 50 --no-pager\n' >&2
-  exit 1
-fi
-bash scripts/healthcheck.sh
+ln -s "$backup" "$PENDING"
+sync -f "$backup"
+phase=stopping
+on_exit() {
+  local code=$?
+  if [[ "$code" -ne 0 ]]; then
+    if [[ "$phase" == startup ]]; then
+      if ! systemctl stop "${UNITS[@]}"; then
+        printf 'Service shutdown failed; inspect and stop remaining processes before recovery.\n' >&2
+      fi
+    fi
+    printf '\nUpdate failed during %s. Recovery data: %s\n' "$phase" "$backup" >&2
+    printf 'Run: sudo bash %s/recover-update.sh\n' "$PENDING" >&2
+    printf 'Do not restart the partially updated release.\n' >&2
+  fi
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-printf '\nUpdate complete. Verify the first-run path with:\n  make diagnose-setup\n'
+step "Stopping services and saving the installed release"
+systemctl stop "${UNITS[@]}"
+require_stopped "${UNITS[@]}" nachtlabs-executor
+"$ROOT_PYTHON" scripts/maintenance_db.py reconciled
+phase=backup
+# Include ignored runtime dependencies and the previous bundle, but never Git's
+# object database. Services are stopped so the saved runtime is consistent.
+tar --exclude='./.git' -cpf "$backup/source.tar.partial" .
+mv "$backup/source.tar.partial" "$backup/source.tar"
+touch "$backup/snapshot-ready"
+
+phase=activation
+# This marker is durable before the first change to installed source/runtime.
+touch "$backup/activation-started"
+sync -f "$backup"
+git merge --ff-only "$target"
+UV_PROJECT_ENVIRONMENT="$NACHTLABS_ROOT/.venv" UV_PYTHON=/usr/bin/python3.12 UV_NO_MANAGED_PYTHON=1 \
+  uv sync --locked --all-packages
+pnpm install --frozen-lockfile
+rm -rf -- "$NACHTLABS_ROOT/apps/web/.next" "$NACHTLABS_ROOT/apps/web/public/docs-assets"
+cp -a "$stage/apps/web/.next" "$NACHTLABS_ROOT/apps/web/.next"
+cp -a "$stage/apps/web/public/docs-assets" "$NACHTLABS_ROOT/apps/web/public/docs-assets"
+# Recheck after promotion as well; never start a release on the wrong schema.
+"$ROOT_PYTHON" "$backup/maintenance_db.py" check-migrations --root "$NACHTLABS_ROOT"
+phase=startup
+systemctl start "${UNITS[@]}"
+sleep 2
+bash scripts/healthcheck.sh
+phase=complete
+rm -- "$PENDING"
+printf '\nUpdate complete. Recovery copy retained at %s; preparation files at %s.\n' "$backup" "$stage"

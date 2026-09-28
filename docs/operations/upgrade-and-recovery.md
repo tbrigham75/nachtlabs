@@ -40,8 +40,9 @@ begin again:
 
     sudo make reset-first-run
 
-This empties the database, re-applies migrations, deletes the web build, rebuilds, and restarts, so
-the next page load must offer Owner setup.
+This empties the database, re-applies migrations **and runtime database permissions**, deletes the
+web build, rebuilds, and health-checks the restarted installation. The next page load offers Owner
+setup. These revised procedures and their regression tests are authored, NOT RUN.
 
 It checks everything before changing anything, and refuses unless it is root, the tree is
 `/opt/nachtlabs`, the working tree is clean, and a systemd unit is installed. It proves the **build
@@ -49,6 +50,30 @@ toolchain** is present and correct first — Node 24, pnpm 10, uv — because th
 bundle it deletes, and a build that cannot succeed must not begin by tearing down what works. It
 prints the row counts it is about to destroy, requires you to type `RESET`, and requires `--force` if
 anything beyond a first account exists: runs, evidence, integrations or audit history.
+
+Stop the executor and reconcile its jobs before resetting. The command holds the broker lock,
+refuses remaining execution units or `active.json`, and refuses claimed, running or uncertain jobs
+even with `--force`. It also refuses unknown database activity and failed service stops. Activity is
+checked again after the API and worker stop, in the same transaction as schema deletion. Use
+`sudo bash scripts/reset-first-run.sh --force` when intentionally discarding recorded activity;
+the `RESET` confirmation is still required.
+
+After migrations, the command restores schema usage and applies `scripts/grants.sql` before any
+service restart. It does not grant runtime roles ownership or evidence-update privileges. A failure
+before startup leaves services stopped and names the failed phase. If reset already committed,
+complete migrations and restore permissions from a root shell with the migration environment:
+
+    cd /opt/nachtlabs
+    set -a; source /etc/nachtlabs/migration.env; set +a
+    .venv/bin/python -m alembic -c apps/api/alembic.ini upgrade head
+    .venv/bin/python scripts/maintenance_db.py grants
+    .venv/bin/python scripts/maintenance_db.py check-migrations
+    make build
+    systemctl start nachtlabs-api nachtlabs-worker nachtlabs-web
+    make healthcheck
+
+Resolve the reported error before using this sequence; it does not restore deleted data. Keep the
+executor stopped. Database credentials are read from files and are never passed as command arguments.
 
 It does **not** touch `/etc/nachtlabs`. Credentials, the master key and every service env file are
 preserved, so `configure.py` does not need to run again and no secret is rotated. A reset is
@@ -184,19 +209,50 @@ and unit state. A stale bundle is reported as such.
 
 Then update:
 
-    make update
+    sudo make update
 
-That target refuses to start unless the working tree is clean, no executor broker is running, and a
-`nachtlabs-api.service` unit is installed. It stops API, worker and web; fetches and fast-forwards
-only; runs `uv sync --locked` and `pnpm install --frozen-lockfile`; runs `scripts/build.sh`; starts
-the services; and runs `make healthcheck`. It never reads, writes or migrates anything under
-`/etc/nachtlabs`, so credentials, the master key and service env files are untouched, and it
-discards no local edits.
+Run from a root shell whose PATH includes Node 24, pnpm 10 and uv. The target requires a clean
+`/opt/nachtlabs` checkout, an upstream branch, installed service units, and a stopped, reconciled
+executor. It reads migration credentials from the trusted environment file but does not modify
+credentials, keys, service environment files or the database schema.
 
-Two deliberate stops. If the range introduces a new Alembic revision under
-`apps/api/migrations/versions`, the target lists it and exits rather than applying it; review and
-apply it deliberately with migrator credentials (`sudo -u nachtlabs_migrator make migrate`). If the
-tree is dirty, it exits rather than clobbering local work.
+While the existing API, worker and web remain available, it fetches the upstream revision, verifies
+fast-forward ancestry, extracts that exact revision into `/opt/nachtlabs-update.*`, resolves locked
+dependencies there, and builds the web application. Preparation failures leave the installed release
+and its services alone. The staged Python environment only warms the dependency cache; it is never
+copied into the installation because its editable paths refer to the staging directory.
+
+The migration check compares the **database's applied Alembic revisions** with the target release,
+both before downtime and after activation. A repeated attempt or previously pulled source cannot
+bypass it. A mismatch stops the update before downtime. For a reviewed migration, stop all services,
+back up the database and executor state, prepare the target dependencies in the printed staging
+directory, and apply that directory's Alembic configuration with migration credentials. Apply its
+grants too. Keep services stopped until the matching source is activated; an older release may not
+work with the migrated database. This updater never performs a schema migration or rollback.
+
+After confirmation, update stops the services and saves the previous source, ignored dependencies,
+and web build under `/var/lib/nachtlabs-maintenance/update.*` with root-only access. It then
+fast-forwards the installed branch, syncs dependencies in place, copies the prepared bundle and
+static assets, checks the database revision again, starts the services and health-checks them.
+Allow disk space for both a staged release and a complete recovery copy.
+
+An interrupted activation leaves `/var/lib/nachtlabs-maintenance/update-pending`. Updates and resets
+refuse to proceed while this marker exists. Recover from its saved script, which does not depend
+on the partially installed Python environment:
+
+    sudo bash /var/lib/nachtlabs-maintenance/update-pending/recover-update.sh
+
+Recovery stops services, restores the previous tracked source and runtime files, verifies that the
+database still matches the restored release, and restarts only the services that were previously
+active. It also handles interruption before the recovery archive was completed, when activation had
+not begun. Do not edit the installation while recovery is pending: recovery deliberately restores
+the source and runtime from the admitted clean checkout. If the database changed meanwhile,
+recovery refuses to restart an incompatible release. After a host restart, inspect this marker and
+recover before manually starting services. Recovery does not revert database data or executor state.
+
+Successful update or recovery removes the pending marker but retains the protected recovery copy
+and preparation directory for inspection. Retire those printed directories only after validating the
+installation and confirming no pending recovery refers to them.
 
 Use `make build` rather than `pnpm build`. The standalone output does not contain `.next/static`
 unless `scripts/build.sh` copies it, and the web unit serves from

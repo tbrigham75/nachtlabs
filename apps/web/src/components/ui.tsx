@@ -15,6 +15,11 @@ export interface Field {
   help?: string;
   options?: { value: string; label: string }[];
 }
+
+// A parent may pause submission to obtain a fresh identity confirmation while
+// keeping this form mounted. Its own notice explains the interruption.
+export class FormInterruption extends Error {}
+
 export function Form({
   fields,
   initial = {},
@@ -38,9 +43,17 @@ export function Form({
       rule = rule.email("Enter a valid email address");
     shape[field.name] = rule;
   });
-  const { register, handleSubmit, formState, setError, resetField } = useForm<
-    Record<string, string>
-  >({ defaultValues: initial, resolver: zodResolver(z.object(shape)) });
+  const {
+    register,
+    handleSubmit,
+    formState,
+    setError,
+    resetField,
+    clearErrors,
+  } = useForm<Record<string, string>>({
+    defaultValues: initial,
+    resolver: zodResolver(z.object(shape)),
+  });
   const [rejected, setRejected] = useState<string[]>([]);
   return (
     <form
@@ -52,6 +65,11 @@ export function Form({
             .filter((field) => field.type === "password")
             .forEach((field) => resetField(field.name, { defaultValue: "" }));
         } catch (error) {
+          if (error instanceof FormInterruption) {
+            clearErrors("root");
+            setRejected([]);
+            return;
+          }
           setError("root", {
             message: error instanceof Error ? error.message : "Unable to save",
           });

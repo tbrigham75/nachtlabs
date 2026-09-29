@@ -289,3 +289,58 @@ the derivation.
 
 E2E: 49 passed, 1 skipped. The skip is `governance.spec.ts`, which signs in as a
 real Owner and skips only when `NACHTLABS_E2E_EMAIL` is unset.
+
+## Moving an installation onto the network, and two corrections
+
+Preparing for an external agent turned up a claim worth retracting. The install
+had `PUBLIC_URL=http://localhost:3035` and
+`ALLOWED_HOSTS=localhost,127.0.0.1,postgres,api`, and the reported conclusion was
+that a client on another box would be refused with a 400 before reaching any
+route. That was not tested, and it is wrong.
+
+A bearer request to the LAN address returns `401 Invalid API key`, which is the
+answer a client with a bad credential gets and proves the request reached the API.
+`TrustedHostMiddleware` never rejects the caller's host in the container
+deployment, because the web service's rewrite re-addresses the internal request to
+`api:8000`, and the API sees that name. The client-controlled `Host` header does
+not survive the hop. The check is inert here, not merely strict.
+
+What actually gates a browser is the origin test, and that one does work: a login
+from an unlisted origin is refused with `403 origin`. So the rebind was needed for
+the browser, not for the agent. A bearer client short-circuits before the origin
+check and never needed it.
+
+This also means the guard in settings.py that refuses to start when a permitted
+origin's host is absent from `ALLOWED_HOSTS` is protecting a check that does not
+run. The two lists still have to agree, so it is not wrong, but the protection it
+appears to offer against a spoofed `Host` is not there in this deployment. Worth
+knowing before a reverse proxy is added and the check starts mattering.
+
+### What changed
+
+1. An install that has already started can be rebound without discarding its
+   volume. Previously the origin keys sat outside the rewrite allowlist and a
+   generated file is never overwritten, so serving the network cost the Owner
+   account. The new keys are recomputed through `origin()` rather than accepted
+   verbatim, so the allowed hosts cannot disagree with the origin they permit.
+2. `NACHTLABS_EXTRA_ORIGINS` was added for the same reason, and its absence was
+   found by testing rather than reasoning: the first rebind revoked loopback and
+   turned the operator's own login into a 403 that reads like bad credentials. An
+   install is normally reachable two ways, and a rebind that permits one and
+   revokes the other is a regression. Entries are validated here, because
+   settings.py refuses a host absent from the allowed list at startup and the
+   message does not say which entry caused it.
+3. The per-source rate limit no longer counts authenticated bearer requests. It
+   was applied to every bearer call, and Next.js does not forward the client's
+   address at all, so the "source" was the web container for everybody: one
+   shared bucket for the installation, which an agent with a polling loop could
+   exhaust and lock the operator out of their own browser with. The limit now
+   guards the key lookup it actually protects, and the per-key bucket, which is
+   tighter, is what bounds an authenticated caller.
+
+`--proxy-headers` was added at the same time. On its own it changes nothing here,
+and it would be easy to believe otherwise: adding the flag and re-measuring
+produced an unchanged result, and the reason turned out to be that the web
+service's build contains no reference to `x-forwarded-for` at all. The flag is
+kept because it makes the per-source bucket meaningful the moment a real reverse
+proxy is in front, which is also what TLS would need.

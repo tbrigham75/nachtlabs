@@ -87,22 +87,38 @@ def principal(request: Request, db: DB) -> Principal:
             "unauthenticated",
             "Bearer credential required",
         )
-        rate_limit(request, "bearer-source", 600)
         raw = authorization[7:]
         key = db.scalar(select(APIKey).where(APIKey.token_hash == digest(raw)))
-        require(
+        account = db.get(ServiceAccount, key.service_account_id) if key is not None else None
+        usable = (
             key is not None
             and key.revoked_at is None
-            and (key.expires_at is None or key.expires_at > now()),
-            401,
-            "unauthenticated",
-            "Invalid API key",
+            and (key.expires_at is None or key.expires_at > now())
+            and account is not None
+            and account.active
         )
+        if not usable:
+            # The per-source limit guards the lookup above, which an unauthenticated
+            # caller can repeat freely. It deliberately does not count requests
+            # that authenticated: the per-key bucket below already bounds those
+            # more tightly, and in a deployment where every request arrives through
+            # the web service the source address is identical for every caller, so
+            # counting authenticated traffic against it turns one shared bucket into
+            # an installation-wide ceiling. An agent with a polling loop could then
+            # lock out the operator's own browser, which is the opposite of what a
+            # rate limit is for.
+            rate_limit(request, "bearer-source", 600)
+            require(
+                key is not None
+                and key.revoked_at is None
+                and (key.expires_at is None or key.expires_at > now()),
+                401,
+                "unauthenticated",
+                "Invalid API key",
+            )
+            assert account is not None
+            require(account.active, 401, "unauthenticated", "Invalid API identity")
         assert key is not None
-        account = db.get(ServiceAccount, key.service_account_id)
-        require(
-            account is not None and account.active, 401, "unauthenticated", "Invalid API identity"
-        )
         assert account is not None
         rate_limit(request, "api", 300, str(key.id))
         key.last_used_at = now()

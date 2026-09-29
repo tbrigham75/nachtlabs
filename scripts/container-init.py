@@ -73,11 +73,20 @@ SERVICE_GID = int(os.environ.get("NACHTLABS_SERVICE_GID", "9000"))
 # wizard told an operator to point this at a bundle in api.env and worker.env, but
 # it was in neither the generated files nor compose, so there was no supported way
 # to set it at all. It is a path, not a secret.
+#
+# The three origin keys are the other such case. They are only ever written from a
+# NACHTLABS_LAN_ORIGIN the operator supplied, and are recomputed rather than
+# accepted verbatim, so the allowlist permits a change of address without permitting
+# an inconsistent one.
 OPERATOR_KEYS = (
     "NACHTLABS_INTEGRATION_NETWORK_ENABLED",
     "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE",
     "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED",
     "NACHTLABS_INTEGRATION_CA_FILE",
+    "NACHTLABS_PUBLIC_URL",
+    "NACHTLABS_ALLOWED_HOSTS",
+    "NACHTLABS_ALLOWED_ORIGINS",
+    "NACHTLABS_ENV",
 )
 
 
@@ -98,6 +107,20 @@ def switch(key: str, default: str = "false") -> str:
     if raw not in {"true", "false"}:
         fail(f"{key} must be true or false, not {raw!r}")
     return raw
+
+
+def switch_if_set(key: str) -> str | None:
+    """The value for a rewrite, or None when the environment did not mention it.
+
+    A rewrite applies only what the operator actually named. Falling back to the
+    default for a switch nobody mentioned would quietly undo a deliberate setting,
+    because rebinding the origin without restating the egress switches would turn
+    provider traffic back off on an install that had turned it on. The same is true
+    of a CA bundle, where an empty default would silently drop a configured one.
+    """
+    if key not in os.environ:
+        return None
+    return switch(key)
 
 
 def _own(path: Path) -> None:
@@ -343,6 +366,62 @@ def main() -> int:
         "NACHTLABS_INTEGRATION_CA_FILE": os.environ.get("NACHTLABS_INTEGRATION_CA_FILE", ""),
     }
 
+    # The origin an install answers on is derived, not typed, and an install that
+    # has already started could not change it at all: PUBLIC_URL and
+    # ALLOWED_HOSTS were outside the rewrite allowlist, and a file is never
+    # overwritten. Moving off loopback therefore meant discarding the volume and
+    # with it the Owner account, which is an absurd price for a Host header.
+    #
+    # These are recomputed from NACHTLABS_LAN_ORIGIN through origin() rather than
+    # accepted verbatim, so the allowed hosts can never disagree with the origin
+    # they are meant to permit, and NACHTLABS_ENV still follows the scheme.
+    #
+    # Only when a new origin is actually supplied. A rewrite that is merely about
+    # provider egress must leave the origin alone, or an unset NACHTLABS_LAN_ORIGIN
+    # would quietly rebind a working LAN install back to loopback and lock the
+    # operator out of their own server.
+    rebind = {}
+    if os.environ.get("NACHTLABS_LAN_ORIGIN", "").strip():
+        rebind = {
+            "NACHTLABS_PUBLIC_URL": public_url,
+            "NACHTLABS_ALLOWED_HOSTS": hosts,
+            "NACHTLABS_ENV": env,
+        }
+        # Extra browser origins, because an install usually has more than one way
+        # to be reached: the LAN address for a machine on another box, and
+        # loopback for whoever is sitting at the server. Without this a rebind
+        # silently revokes whichever of the two it replaced, and the symptom is a
+        # 403 on login that looks like a credentials problem.
+        extra = os.environ.get("NACHTLABS_EXTRA_ORIGINS", "").strip()
+        if extra:
+            for candidate in extra.split(","):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                parsed = urlparse(candidate)
+                if (
+                    parsed.scheme not in {"http", "https"}
+                    or not parsed.hostname
+                    or parsed.path not in {"", "/"}
+                    or parsed.query
+                    or parsed.fragment
+                    or parsed.username
+                    or parsed.password
+                ):
+                    fail(
+                        "NACHTLABS_EXTRA_ORIGINS entries must be a bare scheme, host "
+                        f"and optional port, not {candidate!r}"
+                    )
+                # A permitted origin whose host TrustedHostMiddleware would reject
+                # is refused at startup by settings.py, so catching it here names
+                # the actual mistake rather than an unexplained 400 much later.
+                if parsed.hostname not in hosts.split(","):
+                    fail(
+                        f"NACHTLABS_EXTRA_ORIGINS host {parsed.hostname!r} is not in "
+                        f"the allowed hosts derived from the origin ({hosts})"
+                    )
+            rebind["NACHTLABS_ALLOWED_ORIGINS"] = extra
+
     common = {
         "NACHTLABS_ENV": env,
         "NACHTLABS_PUBLIC_URL": public_url,
@@ -416,10 +495,32 @@ def main() -> int:
     # because a restart must stay a no-op, and because changing whether this
     # installation may send traffic off the box is not something to do by
     # accident while chasing an unrelated failure.
+    # Bound unconditionally so the summary below can report what the install will
+    # actually do, not what this invocation happened to pass. On a rewrite the
+    # switches may have been left alone, and a hint derived from the creation
+    # default would tell an operator provider traffic is off when they turned it on
+    # last week.
+    applied: dict[str, str] = {}
     if switch("NACHTLABS_REWRITE_CONFIG") == "true":
+        # Only what the operator named, plus a rebind if they gave an origin. A key
+        # the environment does not mention keeps the value already in the file.
+        applied = dict(rebind)
+        for key in (
+            "NACHTLABS_INTEGRATION_NETWORK_ENABLED",
+            "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE",
+            "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED",
+        ):
+            given = switch_if_set(key)
+            if given is not None:
+                applied[key] = given
+        if "NACHTLABS_INTEGRATION_CA_FILE" in os.environ:
+            applied["NACHTLABS_INTEGRATION_CA_FILE"] = os.environ["NACHTLABS_INTEGRATION_CA_FILE"]
+
         # Every generated file that carries the keys, not just api.env and
         # worker.env: they share one dict, and leaving any of them behind would
         # give a value that depends on which file a service happened to read.
+        # A rebind is applied to the same set, because the host policy has to be
+        # identical everywhere or a service accepts a Host the others reject.
         for name in (
             "api.env",
             "worker.env",
@@ -427,9 +528,15 @@ def main() -> int:
             "migration.env",
             "test-migration.env",
         ):
-            rewrite_env(name, operator)
+            rewrite_env(name, applied)
         print("")
-        print(f"    Applied {', '.join(sorted(operator))} to the existing configuration.")
+        if applied:
+            print(f"    Applied {', '.join(sorted(applied))} to the existing configuration.")
+        else:
+            print("    Nothing to apply: name a value to change, or pass an origin.")
+        if rebind:
+            print(f"    This installation now answers on {public_url}.")
+            print("    Allowed hosts are recomputed from that origin, not typed.")
         print("    Restart the services that read it: docker compose restart api worker")
         print("")
 
@@ -437,18 +544,33 @@ def main() -> int:
     print("  NachtLabs is ready to start.")
     print("")
     print(f"    Open this in a browser:   {public_url}")
-    if not os.environ.get("NACHTLABS_LAN_ORIGIN", "").strip():
+    if rebind:
+        # Say what the rewrite did and what it did not: the egress switches still
+        # hold whatever was already recorded, because an unset switch keeps its
+        # previous value rather than reverting to the default.
         print("")
-        print("    This is loopback. To serve your network, stop the stack and run:")
+        print("    The origin was recorded. It takes effect after a restart:")
+        print("      docker compose restart api worker")
+        print("    Only the address changed. The egress switches kept their values.")
+    elif not os.environ.get("NACHTLABS_LAN_ORIGIN", "").strip():
+        print("")
+        print("    This is loopback. To serve your network:")
         print(f"      NACHTLABS_LAN_ORIGIN=http://<your-server-ip>:{WEB_PORT} \\")
-        print("        docker compose up -d")
+        print("        NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init")
+        print("        docker compose restart api worker")
+        print("    On a first start, omitting NACHTLABS_REWRITE_CONFIG is enough.")
     print("")
     print("    First run creates the Owner. This installation does not require the")
     print("    one-time setup token, so the first account is whoever reaches the URL")
     print("    first. Set NACHTLABS_SETUP_TOKEN_REQUIRED=true and restart the API if")
     print("    this address is reachable by anyone you do not trust.")
     print("")
-    if operator["NACHTLABS_INTEGRATION_NETWORK_ENABLED"] == "false":
+    # Report what the install will actually do, not what this invocation happened to
+    # pass. On a rewrite the switches may have been left alone, and a hint derived
+    # from the creation default would tell an operator provider traffic is off when
+    # they turned it on last week.
+    effective = {**operator, **applied}
+    if effective["NACHTLABS_INTEGRATION_NETWORK_ENABLED"] == "false":
         print("    Provider traffic is off. The endpoint step will not check or call a")
         print("    model until an operator turns it on, which needs the value recorded")
         print("    in the generated files and a restart of the api and worker:")

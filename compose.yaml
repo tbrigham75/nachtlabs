@@ -263,6 +263,16 @@ services:
       - --no-access-log
       - --log-config
       - config/logging.json
+      # Every API request arrives through the web service's rewrite, so without
+      # this uvicorn sees one peer address and request.client.host is identical
+      # for every caller. Rate limiting is keyed on that address, which collapses
+      # the per-source buckets into one shared for the whole installation: an
+      # agent with a polling loop can then lock out the operator's own browser.
+      # Trust is safe here because the api port is exposed, never published, so
+      # the only peers are services on the internal network.
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
     environment:
       NACHTLABS_CONFIG_DIR: /etc/nachtlabs
       NACHTLABS_ENV_FILE: /etc/nachtlabs/api.env

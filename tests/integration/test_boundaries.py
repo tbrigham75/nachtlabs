@@ -73,6 +73,82 @@ def test_api_key_scope_revocation_and_no_plaintext(owner: TestClient) -> None:
     assert owner.get("/api/v1/projects", headers=headers).status_code == 401
 
 
+def _key_for(owner: TestClient, project: dict) -> tuple[dict, dict]:
+    account = owner.post("/api/v1/service-accounts", json={"name": f"bot-{uuid4().hex[:8]}"}).json()
+    key = owner.post(
+        "/api/v1/api-keys",
+        json={
+            "service_account_id": account["id"],
+            "name": "Reader",
+            "scopes": ["projects:read"],
+            "project_ids": [project["id"]],
+        },
+    ).json()
+    return key, {"Authorization": "Bearer " + key["raw_key"]}
+
+
+def test_authenticated_key_traffic_does_not_consume_the_source_bucket(
+    owner: TestClient,
+) -> None:
+    """A valid key must not be throttled by a bucket keyed on the caller's address.
+
+    In the container deployment every request reaches the API through the web
+    service's rewrite, and Next.js does not forward the client's address, so the
+    source is the same value for every caller. Counting authenticated requests
+    against that made one shared bucket: an agent polling in a loop exhausted the
+    installation's allowance and the operator's own browser then got 429.
+
+    Three keys are used deliberately. 220 each is past the 600 per-source
+    allowance in total, but under the 300 per-key allowance individually, so this
+    distinguishes the two limits: if authenticated traffic still counted against
+    the source, requests past 600 would fail; with the per-key bucket doing the
+    bounding, all 660 succeed.
+    """
+    project = owner.post("/api/v1/projects", json={"name": "Shared", "slug": "shared"}).json()
+    keys = [_key_for(owner, project) for _ in range(3)]
+
+    for _, headers in keys:
+        for _ in range(220):
+            assert owner.get("/api/v1/projects", headers=headers).status_code == 200
+
+    # And a fourth key minted afterwards is unaffected, which is the property that
+    # was actually lost: the allowance had been global rather than per credential.
+    _, fresh = _key_for(owner, project)
+    assert owner.get("/api/v1/projects", headers=fresh).status_code == 200
+
+
+def test_a_single_key_is_still_bounded_by_its_own_allowance(owner: TestClient) -> None:
+    """Moving the limit must not remove throttling, only relocate it.
+
+    The per-key bucket is what now bounds an authenticated caller. Without this,
+    the fix could be read as "authenticated traffic is unlimited".
+    """
+    project = owner.post("/api/v1/projects", json={"name": "Bounded", "slug": "bounded"}).json()
+    _, headers = _key_for(owner, project)
+
+    statuses = {owner.get("/api/v1/projects", headers=headers).status_code for _ in range(400)}
+    assert 429 in statuses, "one key must still hit its own ceiling"
+
+
+def test_invalid_keys_are_still_throttled_per_source(owner: TestClient) -> None:
+    """The limit the fix moved has to still protect the lookup it guards.
+
+    An unauthenticated caller can repeat the key lookup freely, so the failure path
+    is where the per-source limit belongs. Dropping it entirely would leave that
+    lookup unmetered.
+    """
+    project = owner.post("/api/v1/projects", json={"name": "Metered", "slug": "metered"}).json()
+    _, headers = _key_for(owner, project)
+    headers["Authorization"] = "Bearer nl_not-a-real-key"
+
+    with session() as db:
+        db.execute(text("delete from rate_buckets"))
+        db.commit()
+
+    statuses = {owner.get("/api/v1/projects", headers=headers).status_code for _ in range(700)}
+    assert 429 in statuses, "repeated invalid keys must eventually be rate limited"
+
+
 def journey() -> dict:
     return {
         "description": "A user can sign in",

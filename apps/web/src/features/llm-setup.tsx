@@ -528,6 +528,55 @@ export function endpointProblems(input: EndpointInput): string[] {
   return problems;
 }
 
+/*
+  Why there is a second address box at all.
+
+  The transport connects to the pinned number and never looks a name up, so the
+  destination cannot be changed after the operator has seen it and said yes. The
+  field is unfashionable next to the origin, which already names a host, and the
+  cost of that duplication is not obvious from the label. It is explained here in
+  plain terms rather than in the field's help, which has to stay short enough to
+  be read, and the mechanism is left to
+  packages/core/src/nachtlabs/integrations/transport.py.
+*/
+function PinExplainer() {
+  return (
+    <details className="notice">
+      <summary>What is “Pinned server IP”, and why do I type it twice?</summary>
+      <p>
+        <strong>In short:</strong> the address above says <em>where to go</em>,
+        and this one says <em>exactly which machine that is</em>. They are
+        usually the same text, and that is normal.
+      </p>
+      <p>
+        <strong>Think of a name in a phone book.</strong> If you call “Ollama”,
+        somebody looks the name up in a book to find a number. The lookup
+        happens again every single time, and anyone who can edit that book can
+        quietly change which number you reach. A “pin” is a phone number written
+        down once, so there is no lookup to tamper with.
+      </p>
+      <p>
+        That matters here because each request carries a secret. If NachtLabs
+        sent your model server’s key to whichever machine a name pointed at, and
+        something changed that name between one call and the next, the secret
+        would leave this installation. Pinning the address means the secret can
+        only ever be sent to the one machine you already approved.
+      </p>
+      <p>
+        <strong>Which address is it, then?</strong> It is the model server’s,
+        not this machine’s. If you typed <code>192.168.1.50</code> in the origin
+        above, put <code>192.168.1.50</code> here too. The two boxes are allowed
+        to disagree only when the origin uses a name instead of a number.
+      </p>
+      <p>
+        <strong>Why can I not type a name here?</strong> Because a name would
+        need looking up, which is the thing being removed. Type the numbers
+        directly; on the host console, <code>ip addr</code> will show them.
+      </p>
+    </details>
+  );
+}
+
 function ConnectionStep({
   existing,
   allowPrivateHttp,
@@ -554,7 +603,7 @@ function ConnectionStep({
       name: "address",
       label: "Pinned server IP",
       required: true,
-      help: "One numeric address, resolved on the host console; the interface never resolves hostnames for you. It is the address of the model server, not of this one. If the origin above already contains an IP, the two must match.",
+      help: "The model server's own number address, like 192.168.1.50. This is where the messages actually get sent — not an address on this machine. It has to match the address in the origin above. See the explanation below this form.",
     },
     {
       name: "allow_private",
@@ -589,6 +638,7 @@ function ConnectionStep({
           a mistake here cannot silently change a running configuration.
         </p>
       )}
+      <PinExplainer />
       <Form
         fields={fields}
         initial={{

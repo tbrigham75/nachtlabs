@@ -121,6 +121,36 @@ describe("llm setup wizard", () => {
     expect(screen.getByRole("button", { name: "Save endpoint" })).toBeEnabled();
   });
 
+  it("explains the pinned address in plain terms, and says which machine it is", async () => {
+    // The second address box is the least self-explanatory thing on this screen:
+    // the origin above already names a host, so asking for the address again
+    // looks like a mistake. The cost of NOT explaining it is an operator who
+    // types their own machine's address, or a hostname, and gets a refusal they
+    // cannot read. So the explanation is pinned by this test.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    const summary = screen.getByText(/What is .Pinned server IP/);
+    expect(summary).toBeInTheDocument();
+    const explainer = summary.closest("details")!;
+    // It must actually open, not just exist: a hidden explanation is no
+    // explanation.
+    explainer.open = true;
+    const text = explainer.textContent ?? "";
+    // The phone-book analogy is the whole reason this is understandable.
+    expect(text).toMatch(/phone book/i);
+    // The security reason, in the words an operator would use.
+    expect(text).toMatch(/secret/i);
+    // And the practical disambiguation, which is the part people get wrong.
+    expect(text).toMatch(/model server/i);
+    expect(text).toMatch(/not this machine/i);
+    // A name is refused here, so say so before they try it.
+    expect(text).toMatch(/not type a name|needs looking up/i);
+  });
+
   it("warns permanently about a cleartext endpoint that is not loopback", async () => {
     // The one thing the interface must not do is quietly accept a shape whose
     // cost is invisible after the fact. Both directions of the exposure are

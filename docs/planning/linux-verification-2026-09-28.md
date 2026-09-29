@@ -239,3 +239,53 @@ A run with credentials for an account removed by a reinitialisation reports fail
 have nothing to do with the code under test. The distinction matters: it was traced to the
 absent account before the pin change was cleared, and reproduced with the change stashed
 out, rather than being assumed from a green-looking count.
+
+## Provider egress, and two defects that hid a feature behind a policy message
+
+An operator could not reach Step 3. The interface reported provider checks as
+disabled by policy, which was true, but the documented way to enable it did
+nothing, so the message was not the whole of the problem.
+
+1. `container-init.py` hard-coded `NACHTLABS_INTEGRATION_NETWORK_ENABLED=false`,
+   and `compose.yaml` also passed it in `environment:`. `with-env.sh` sources
+   the generated file *after* compose sets the container environment, so the
+   compose value was silently discarded. The runbook documented the compose
+   variable, so the advertised procedure had never worked. Verified directly:
+   compose passed `true`, sourcing the file overwrote it with `false`, and
+   `network_allowed("ollama")` reported `False`.
+2. `compose.yaml` named no build target, and the last stage in `Dockerfile.api`
+   is `test`, which carries the dev group and no `postgresql-client`. Any
+   `docker compose build` therefore tagged the wrong artifact as the service
+   image. It failed late and misleadingly: api, worker and migrations started,
+   and only the roles step died with `psql: command not found`.
+
+The first was masked because the wizard's instruction was to edit
+`/etc/nachtlabs/api.env`, a path inside a named volume the host cannot see. The
+second was masked because the previously started roles container was reused
+until a compose change forced it to be recreated.
+
+The switches are now recorded by `container-init.py` and absent from the compose
+`environment:` block; `NACHTLABS_REWRITE_CONFIG=true` updates the operator
+allowlist on an install that already started, which is what makes the documented
+change followable without discarding the volume. `NACHTLABS_INTEGRATION_CA_FILE`
+was given the same treatment: the wizard told operators to set it, and it was in
+neither the generated files nor compose, so there had been no supported way.
+
+Both compose defects now have tests, and the tests were confirmed to fail when
+the defects are reintroduced. That check mattered: the first version of the
+shadowing test derived its key set by parsing a dict literal that the switches
+now reach through a splat, so it compared against an empty set and passed while
+the defect was present. It reads the generated files now.
+
+### What the full gate does and does not cover
+
+`make test` is unit tests plus web tests and never touches a running container.
+`pnpm test:e2e` against the container stack is the only thing that exercises a
+built image, and it found 9 failures that no earlier check had: the E2E tests
+still filled the pinned-IP field, which is correctly read-only now that a
+numeric origin derives it. Those tests had been passing only because the
+deployed bundle was stale. They assert the derived value now, which also covers
+the derivation.
+
+E2E: 49 passed, 1 skipped. The skip is `governance.spec.ts`, which signs in as a
+real Owner and skips only when `NACHTLABS_E2E_EMAIL` is unset.

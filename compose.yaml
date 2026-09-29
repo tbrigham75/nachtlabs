@@ -35,6 +35,12 @@ x-app: &app
   build:
     context: .
     dockerfile: Dockerfile.api
+    # The last stage in Dockerfile.api is `test`, which carries the dev group and
+    # no postgresql-client, so a build without a target tags the wrong artifact as
+    # nachtlabs/api:local. It fails late and confusingly: the api, worker and
+    # migration steps all start, and only the roles step dies with
+    # "psql: command not found". The runtime image is `final`.
+    target: final
   image: nachtlabs/api:local
   restart: unless-stopped
   environment:
@@ -94,6 +100,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+      target: final
     image: nachtlabs/api:local
     container_name: nachtlabs-init
     user: "0:0"
@@ -259,10 +266,10 @@ services:
     environment:
       NACHTLABS_CONFIG_DIR: /etc/nachtlabs
       NACHTLABS_ENV_FILE: /etc/nachtlabs/api.env
-      # The operator opts in to provider egress explicitly. This file never
-      # enables it, so the switch is set here rather than in generated config.
-      NACHTLABS_INTEGRATION_NETWORK_ENABLED: ${NACHTLABS_INTEGRATION_NETWORK_ENABLED:-false}
-      NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE: ${NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE:-false}
+      # The provider-egress switches are deliberately absent. They are recorded
+      # into the generated files by container-init.py, and with-env.sh sources
+      # those files after compose has set the container's environment, so a value
+      # set here would be silently discarded. See NACHTLABS_REWRITE_CONFIG.
     healthcheck:
       test:
         - CMD
@@ -282,8 +289,7 @@ services:
     environment:
       NACHTLABS_CONFIG_DIR: /etc/nachtlabs
       NACHTLABS_ENV_FILE: /etc/nachtlabs/worker.env
-      NACHTLABS_INTEGRATION_NETWORK_ENABLED: ${NACHTLABS_INTEGRATION_NETWORK_ENABLED:-false}
-      NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE: ${NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE:-false}
+      # Absent for the same reason as in the api service above.
     command:
       - python3
       - -m

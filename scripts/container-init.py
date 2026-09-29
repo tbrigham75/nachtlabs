@@ -9,7 +9,9 @@ prints where the one-time values are.
 The rules that carry over from configure.py are kept deliberately:
 
   * Nothing is ever overwritten. An existing file wins, so restarting the stack
-    is a no-op and a rotation stays an explicit operator action.
+    is a no-op and a rotation stays an explicit operator action. The one
+    exception is an explicit NACHTLABS_REWRITE_CONFIG=true, which updates the
+    operator-tunable switches in OPERATOR_KEYS and nothing else.
   * Secrets are written 0600, or 0640 for the two the API reads, because the
     service account has to be able to read them and must not be able to rewrite
     them.
@@ -55,10 +57,47 @@ API_HOST = os.environ.get("NACHTLABS_API_HOST", "api")
 SERVICE_UID = int(os.environ.get("NACHTLABS_SERVICE_UID", "9000"))
 SERVICE_GID = int(os.environ.get("NACHTLABS_SERVICE_GID", "9000"))
 
+# The keys an operator may change on a live install, and the only ones the
+# rewrite path below is allowed to touch. Deliberately a list and not a pattern:
+# this rewrites a live install's configuration, so a key not named here cannot be
+# reached by it no matter what it looks like.
+#
+# The first of these is the one that made the rewrite necessary at all. It is
+# written into the generated files, and with-env.sh sources those files after
+# compose has set the container's environment, so a compose-level value for it was
+# silently discarded and the advertised way to enable it did nothing. They are
+# recorded from the environment when a file is first written instead, which makes
+# the documented command work and leaves the generated file as the single source.
+#
+# The CA bundle is here for the same reason and was the clearest case of it: the
+# wizard told an operator to point this at a bundle in api.env and worker.env, but
+# it was in neither the generated files nor compose, so there was no supported way
+# to set it at all. It is a path, not a secret.
+OPERATOR_KEYS = (
+    "NACHTLABS_INTEGRATION_NETWORK_ENABLED",
+    "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE",
+    "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED",
+    "NACHTLABS_INTEGRATION_CA_FILE",
+)
+
 
 def fail(message: str) -> None:
     print(f"container-init: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def switch(key: str, default: str = "false") -> str:
+    """Read a boolean switch, refusing anything that is not true or false.
+
+    pydantic would reject a typo eventually, but the message names a setting
+    several layers from this file and arrives after the stack is already up. A
+    switch that decides whether this installation may send traffic off the box is
+    worth refusing early and naming clearly.
+    """
+    raw = os.environ.get(key, default).strip().lower()
+    if raw not in {"true", "false"}:
+        fail(f"{key} must be true or false, not {raw!r}")
+    return raw
 
 
 def _own(path: Path) -> None:
@@ -218,10 +257,91 @@ def write_env(name: str, values: dict[str, str], mode: int = 0o600) -> None:
     _own(path)
 
 
+def rewrite_env(name: str, values: dict[str, str]) -> bool:
+    """Update named keys in an existing generated file, leaving the rest alone.
+
+    Editing a value by hand means editing a file inside a named volume that the
+    host cannot see, so this exists to make the documented change followable. It is
+    deliberately narrow:
+
+      * only keys in OPERATOR_KEYS are written; anything else is a no-op, so a
+        caller cannot reach a credential, a token or a database URL by passing a
+        wider dict,
+      * every other line is preserved exactly, including order, quoting and
+        comments, so an operator's own notes survive,
+      * a key that is absent is appended rather than invented elsewhere, and the
+        file's mode and group ownership are put back after writing.
+
+    Returns whether anything changed, so a no-op run stays quiet.
+    """
+    path = ROOT / name
+    if not path.exists():
+        return False
+    updates = {k: v for k, v in values.items() if k in OPERATOR_KEYS}
+    if not updates:
+        return False
+    stat = path.stat()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in lines:
+        # Only an unquoted assignment is a key. Quoting is how a value containing
+        # '=' is stored, so splitting on the first '=' identifies the key and
+        # leaves the value's own '=' alone.
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+        if key in updates:
+            out.append(f"{key}={shlex.quote(updates[key])}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={shlex.quote(value)}")
+    body = "\n".join(out) + "\n"
+    if body == path.read_text(encoding="utf-8"):
+        return False
+    # Replace rather than rewrite in place: the service account must never observe
+    # a partially written configuration file. The temporary is created with the
+    # final mode rather than chmod-ed to it, so it is never briefly readable at
+    # whatever the umask happened to be.
+    tmp = path.with_name(path.name + ".rewrite")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.st_mode & 0o7777)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    _own(tmp)
+    tmp.replace(path)
+    return True
+
+
 def main() -> int:
     public_url, host, hosts = origin()
     files = build_credentials()
     env = "production" if public_url.startswith("https://") else "development"
+
+    # Recorded, never decided. Both default false and an unset environment stays
+    # false, so this step cannot widen the installation on its own; it only records
+    # an opt-in the operator already made in the environment. The value is written
+    # into the generated files rather than passed through compose, because
+    # with-env.sh sources those files after compose has set the container's
+    # environment and would otherwise discard it.
+    #
+    # NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE was not written here before, which
+    # is why its compose override worked while this one did not. It is recorded the
+    # same way now so the two switches behave identically.
+    operator = {
+        "NACHTLABS_INTEGRATION_NETWORK_ENABLED": switch("NACHTLABS_INTEGRATION_NETWORK_ENABLED"),
+        "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE": switch(
+            "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE"
+        ),
+        "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED": switch("NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED"),
+        # Not a switch: a path, so no strict boolean parsing. Empty means trust
+        # only the system roots, which is the correct default.
+        "NACHTLABS_INTEGRATION_CA_FILE": os.environ.get("NACHTLABS_INTEGRATION_CA_FILE", ""),
+    }
 
     common = {
         "NACHTLABS_ENV": env,
@@ -230,10 +350,7 @@ def main() -> int:
         "NACHTLABS_ALLOWED_ORIGINS": "",
         "NACHTLABS_MASTER_KEY_FILE": str(CREDENTIALS / "master-key"),
         "NACHTLABS_MASTER_KEY_ID": "v1",
-        # Both default false and stay false. A public install must opt in
-        # explicitly, and this step must never widen either on its own.
-        "NACHTLABS_INTEGRATION_NETWORK_ENABLED": "false",
-        "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED": "false",
+        **operator,
         "NACHTLABS_SMTP_HOST": "",
         "NACHTLABS_SMTP_PORT": "587",
         "NACHTLABS_SMTP_TLS_MODE": "starttls",
@@ -292,6 +409,30 @@ def main() -> int:
         0o640,
     )
 
+    # The switches are recorded when a file is first written, and a file is never
+    # rewritten, so an install created before this existed keeps its original
+    # values forever. NACHTLABS_REWRITE_CONFIG=true applies the environment to an
+    # existing install instead. It is a separate step rather than automatic
+    # because a restart must stay a no-op, and because changing whether this
+    # installation may send traffic off the box is not something to do by
+    # accident while chasing an unrelated failure.
+    if switch("NACHTLABS_REWRITE_CONFIG") == "true":
+        # Every generated file that carries the keys, not just api.env and
+        # worker.env: they share one dict, and leaving any of them behind would
+        # give a value that depends on which file a service happened to read.
+        for name in (
+            "api.env",
+            "worker.env",
+            "executor.env",
+            "migration.env",
+            "test-migration.env",
+        ):
+            rewrite_env(name, operator)
+        print("")
+        print(f"    Applied {', '.join(sorted(operator))} to the existing configuration.")
+        print("    Restart the services that read it: docker compose restart api worker")
+        print("")
+
     print("")
     print("  NachtLabs is ready to start.")
     print("")
@@ -307,6 +448,14 @@ def main() -> int:
     print("    first. Set NACHTLABS_SETUP_TOKEN_REQUIRED=true and restart the API if")
     print("    this address is reachable by anyone you do not trust.")
     print("")
+    if operator["NACHTLABS_INTEGRATION_NETWORK_ENABLED"] == "false":
+        print("    Provider traffic is off. The endpoint step will not check or call a")
+        print("    model until an operator turns it on, which needs the value recorded")
+        print("    in the generated files and a restart of the api and worker:")
+        print("      NACHTLABS_INTEGRATION_NETWORK_ENABLED=true \\")
+        print("        NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init")
+        print("        docker compose restart api worker")
+        print("")
     print(f"    Generated credentials are in {CREDENTIALS} (mode 0600/0640).")
     print("    They are never written to the repository or baked into an image.")
     print("")

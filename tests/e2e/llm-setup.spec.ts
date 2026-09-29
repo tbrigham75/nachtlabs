@@ -318,6 +318,25 @@ test.describe("llm setup wizard", () => {
 });
 
 test.describe("connecting a remote model endpoint", () => {
+  /*
+    The pin is derived when the origin is a number, so these tests assert the
+    derived value rather than typing it. They previously filled the field, which
+    stopped working when it correctly became read-only -- and the failure only
+    appeared once a container serving the new bundle was deployed, because a
+    build-and-test run exercised the source while the browser exercised the
+    image. Asserting the derived value keeps the original intent (these tests are
+    about the messages around the field, not about typing into it) and covers the
+    derivation as a side effect.
+  */
+  async function expectDerivedPin(
+    page: import("@playwright/test").Page,
+    address: string,
+  ) {
+    const pin = page.getByLabel(/Pinned server IP/);
+    await expect(pin).toHaveValue(address);
+    await expect(pin).toHaveAttribute("readonly", "");
+  }
+
   // The operator's own report: a LAN Ollama submitted as plain HTTP came back as
   // "Check the indicated fields", which names no field and says nothing about
   // what to change. The API cannot report why, so the form has to.
@@ -404,7 +423,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     // Names the field's rule, the offending address, and the way out.
     //
@@ -441,7 +460,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     // Endpoint-level permission given, installation-level refused: this is the
     // message that names the environment variable to change.
@@ -462,7 +481,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     await page
       .getByLabel(/Permit this private or loopback address/)
       .selectOption("false");
@@ -491,7 +510,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     await expect(page.locator("p.error")).toBeVisible();
     await page.waitForTimeout(600);
@@ -508,7 +527,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page.goto("/llm-setup");
     await page.getByLabel(/Connection name/).fill("LAN Ollama");
     await page.getByLabel(/Model endpoint origin/).fill("https://192.168.1.50");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     await expect(page.getByText(/Endpoint saved/)).toBeVisible({
       timeout: 15000,
@@ -522,7 +541,7 @@ test.describe("connecting a remote model endpoint", () => {
     await mockProvider(page);
     await page.goto("/llm-setup");
     await page.getByLabel(/Model endpoint origin/).fill("https://192.168.1.50");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     // Default is Yes, so turn it off to exercise the rule.
     await page
       .getByLabel(/Permit this private or loopback/)
@@ -560,7 +579,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     // Both permission fields are Yes/No selects that already default to Yes for
     // a loopback endpoint. Calling check() on them was a leftover from when they
     // were checkboxes, and it threw "Not a checkbox or radio button" before the
@@ -587,7 +606,7 @@ test.describe("connecting a remote model endpoint", () => {
     await page
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
-    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await expectDerivedPin(page, "192.168.1.50");
     // Both permission fields are Yes/No selects that already default to Yes for
     // a loopback endpoint. Calling check() on them was a leftover from when they
     // were checkboxes, and it threw "Not a checkbox or radio button" before the
@@ -625,7 +644,7 @@ test.describe("connecting a remote model endpoint", () => {
     });
     await page.goto("/llm-setup");
     await page.getByLabel(/Model endpoint origin/).fill("http://93.184.216.34");
-    await page.getByLabel(/Pinned server IP/).fill("93.184.216.34");
+    await expectDerivedPin(page, "93.184.216.34");
     // Made explicit rather than left to the default: this test is about what
     // happens when cleartext is permitted, so the permission has to be visibly
     // granted. It is a Yes/No select, not a checkbox, so check() would throw.

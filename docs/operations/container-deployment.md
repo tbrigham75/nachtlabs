@@ -77,7 +77,10 @@ Read the token with `docker compose exec api cat /etc/nachtlabs/credentials/boot
 
 ## Connecting a model provider
 
-Provider egress is off by default and this file never enables it. Opt in explicitly:
+Provider egress is off by default and this file never enables it on its own. It is recorded in the
+generated configuration by `init`, which is the only place the value is read from.
+
+**On a new installation**, pass the switches when the stack is first started:
 
 ```bash
 NACHTLABS_INTEGRATION_NETWORK_ENABLED=true \
@@ -85,6 +88,26 @@ NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true \
 NACHTLABS_LAN_ORIGIN=http://<server-ip>:3035 \
 docker compose up -d
 ```
+
+**On an installation that already started**, the generated files are never overwritten, so a
+restart will not pick the value up. Apply it to what is already there:
+
+```bash
+NACHTLABS_INTEGRATION_NETWORK_ENABLED=true \
+NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true \
+NACHTLABS_REWRITE_CONFIG=true \
+docker compose run --rm init
+docker compose restart api worker
+```
+
+`NACHTLABS_REWRITE_CONFIG=true` updates only the three egress switches
+(`INTEGRATION_NETWORK_ENABLED`, `INTEGRATION_ALLOW_HTTP_PRIVATE`,
+`GIT_PROVIDER_NETWORK_ENABLED`). Credentials, the master key, tokens and database URLs are not
+reachable from it. It is a separate step rather than automatic so that restarting the stack stays a
+no-op, and so that widening what an installation may reach is always a deliberate act.
+
+The restart matters: these values are read when a process starts, so `api` and `worker` keep the
+old value until they are restarted.
 
 - `INTEGRATION_NETWORK_ENABLED` permits provider calls at all. Both the API and the worker must
   agree: the worker is the process that dials the provider, and a mismatch means discovery and
@@ -94,6 +117,15 @@ docker compose up -d
   `.env.example` and in the wizard: the work request, Mission, Journeys, allowed paths, validation
   commands and repository metadata travel in the clear, and the reply becomes the recorded plan
   for a governed run.
+
+### Why compose `environment:` is not how these are set
+
+`with-env.sh` sources the generated file *after* compose has set the container's environment, so
+any value passed in the compose `environment:` block for a key that also appears in the generated
+file is silently discarded. That made an earlier version of this section wrong: it documented a
+`docker compose up -d` with the switch set, which could not work, and the wizard told the operator
+to edit a file inside a named volume that the host cannot see. The switches are absent from the
+`environment:` block on purpose, and a test asserts they stay absent.
 
 Then use the setup wizard in the interface: origin, pinned numeric IP, and both permission
 toggles. The address is stored in the database and never written to a file in the repository.

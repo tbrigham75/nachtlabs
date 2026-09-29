@@ -223,11 +223,15 @@ export function LlmSetupScreen({ user }: { user: User }) {
           Setting a connection and a model profile still works and is stored
           normally, but nothing can be discovered and no model can be called
           until an operator sets{" "}
-          <code>NACHTLABS_INTEGRATION_NETWORK_ENABLED=true</code> in{" "}
-          <code>/etc/nachtlabs/api.env</code> and{" "}
-          <code>/etc/nachtlabs/worker.env</code> and restarts both services. The
-          interface deliberately cannot enable this itself. Step 3 will stay
-          blocked until then.
+          <code>NACHTLABS_INTEGRATION_NETWORK_ENABLED=true</code> in the
+          deployment and restarts the API and the worker. In the container
+          install that is{" "}
+          <code>
+            NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init
+          </code>
+          , then <code>docker compose restart api worker</code>. The interface
+          deliberately cannot enable this itself. Step 3 will stay blocked until
+          then.
         </p>
       )}
       {/*
@@ -247,13 +251,17 @@ export function LlmSetupScreen({ user }: { user: User }) {
           </strong>{" "}
           Its certificate must be one this installation trusts; if you use your
           own certificate authority, point{" "}
-          <code>NACHTLABS_INTEGRATION_CA_FILE</code> at the CA bundle in{" "}
-          <code>api.env</code> <em>and</em> <code>worker.env</code>, because the
-          discovery check and the planning call each build their own connection
-          and setting it in only one is not enough. Separately, agents do not
-          run against a private address until the root execution catalog lists
-          it with <code>allow_private_network</code>, which re-opens the
-          executor qualification.
+          <code>NACHTLABS_INTEGRATION_CA_FILE</code> at the CA bundle in the
+          deployment configuration, because the discovery check and the planning
+          call each build their own connection and setting it in only one of the
+          two services is not enough. In the container install that is{" "}
+          <code>
+            NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init
+          </code>
+          , then <code>docker compose restart api worker</code>. Separately,
+          agents do not run against a private address until the root execution
+          catalog lists it with <code>allow_private_network</code>, which
+          re-opens the executor qualification.
         </p>
       )}
       {state.connection?.cleartext_endpoint && (
@@ -526,7 +534,7 @@ export function endpointProblems(input: EndpointInput): string[] {
       } else if (!input.allowPrivateHttp) {
         problems.push(
           input.allowPrivate
-            ? `This installation does not permit cleartext to a private address, and this one is ${input.pin.trim()}. Use https:// for it, or set NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true in api.env and worker.env and restart both.`
+            ? `This installation does not permit cleartext to a private address, and this one is ${input.pin.trim()}. Use https:// for it, or set NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true in the deployment configuration and restart the API and the worker.`
             : `Plain HTTP is only accepted for a loopback address, and this one is ${input.pin.trim()}. Use https:// for it.`,
         );
       }
@@ -792,9 +800,13 @@ function DiscoveryStep({
             <strong>Blocked by installation policy.</strong> This check sends
             provider traffic, and{" "}
             <code>NACHTLABS_INTEGRATION_NETWORK_ENABLED</code> is false. An
-            operator must set it in <code>/etc/nachtlabs/api.env</code> and{" "}
-            <code>/etc/nachtlabs/worker.env</code>, then restart both services.
-            Keep the Git switch false.
+            operator must set it in the deployment configuration, then restart
+            the API and the worker. In the container install:{" "}
+            <code>
+              NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init
+            </code>
+            , then <code>docker compose restart api worker</code>. Keep the Git
+            switch false.
           </p>
           <p>
             The interface cannot enable this, and will not pretend the endpoint

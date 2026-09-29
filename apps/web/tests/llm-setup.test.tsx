@@ -166,6 +166,60 @@ describe("llm setup wizard", () => {
     expect(screen.queryByText("This endpoint is unprotected.")).toBeNull();
   });
 
+  it("does not claim a certificate is required for a cleartext origin", async () => {
+    // The transport builds no TLS context at all for cleartext, so telling an
+    // operator about CA bundles for http:// asserts something false about the
+    // most common local configuration there is.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    const origin = screen.getByLabelText(/Model endpoint origin/);
+    fireEvent.change(origin, {
+      target: { value: "http://192.168.7.20:11434" },
+    });
+    expect(
+      screen.queryByText(/Two things to know before an https endpoint/),
+    ).toBeNull();
+  });
+
+  it("still explains the certificate requirement for an https origin", async () => {
+    // Scoping the notice must not lose it where it is true.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    const origin = screen.getByLabelText(/Model endpoint origin/);
+    fireEvent.change(origin, {
+      target: { value: "https://192.168.7.20:11434" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Two things to know before an https endpoint/),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/NACHTLABS_INTEGRATION_CA_FILE/),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about certificates for a saved cleartext connection", async () => {
+    // The saved connection is authoritative once there is one.
+    renderWizard(readiness({ connection: cleartext, connection_count: 1 }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("This endpoint is unprotected."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/Two things to know before an https endpoint/),
+    ).toBeNull();
+  });
+
   it("resumes at discovery once an endpoint is saved", async () => {
     renderWizard(
       readiness({
@@ -396,9 +450,7 @@ describe("setup transitions", () => {
     }
     expect(screen.getByText(/Configuration is incomplete/)).toBeVisible();
     expect(screen.queryByText(/Configuration is complete/)).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "4. Model profiles" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "4. Model profiles" }));
     expect(
       screen.getByText("Create an active model endpoint first."),
     ).toBeVisible();
@@ -407,69 +459,122 @@ describe("setup transitions", () => {
   it("completes endpoint, discovery, profiles and agent without reloading", async () => {
     const ready = readiness();
     renderWizard(ready);
-    write.mockImplementation(async (path: string, body: Record<string, unknown>) => {
-      if (path === "/integrations") {
-        ready.connection = endpoint;
-        ready.connection_count = 1;
-        return { id: "c1" };
-      }
-      if (path.endsWith("/probes")) {
-        ready.discovery = { state: "pending", models: [], checked_at: null };
-        return { id: "probe1" };
-      }
-      if (path === "/model-profiles") {
-        const profile = { id: String(body.role), model: String(body.model) };
-        if (body.role === "implementation") ready.implementation_profile = profile;
-        else ready.verifier_profile = profile;
-        ready.distinct_models =
-          !!ready.implementation_profile &&
-          !!ready.verifier_profile &&
-          ready.implementation_profile.model !== ready.verifier_profile.model;
-        return profile;
-      }
-      if (path === "/agents") {
-        ready.agent = {
-          id: "agent1",
-          name: "Hermes",
-          provider: "hermes",
-          executable: "/usr/local/bin/hermes",
-        };
-        ready.complete = true;
-        return ready.agent;
-      }
-      throw new Error(`Unexpected write: ${path}`);
-    });
-    fireEvent.click(await screen.findByRole("button", { name: "Save endpoint" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue to connection check" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Continue to connection check" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Request connection check" }));
+    write.mockImplementation(
+      async (path: string, body: Record<string, unknown>) => {
+        if (path === "/integrations") {
+          ready.connection = endpoint;
+          ready.connection_count = 1;
+          return { id: "c1" };
+        }
+        if (path.endsWith("/probes")) {
+          ready.discovery = { state: "pending", models: [], checked_at: null };
+          return { id: "probe1" };
+        }
+        if (path === "/model-profiles") {
+          const profile = { id: String(body.role), model: String(body.model) };
+          if (body.role === "implementation")
+            ready.implementation_profile = profile;
+          else ready.verifier_profile = profile;
+          ready.distinct_models =
+            !!ready.implementation_profile &&
+            !!ready.verifier_profile &&
+            ready.implementation_profile.model !== ready.verifier_profile.model;
+          return profile;
+        }
+        if (path === "/agents") {
+          ready.agent = {
+            id: "agent1",
+            name: "Hermes",
+            provider: "hermes",
+            executable: "/usr/local/bin/hermes",
+          };
+          ready.complete = true;
+          return ready.agent;
+        }
+        throw new Error(`Unexpected write: ${path}`);
+      },
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Save endpoint" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Continue to connection check" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to connection check" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Request connection check" }),
+    );
     await screen.findByText("Queued");
     ready.discovery = discovered;
-    fireEvent.click(await screen.findByRole("button", { name: "Continue to model profiles" }, { timeout: 6500 }));
-    fireEvent.click(await screen.findByRole("button", { name: "Create implementation profile" }));
+    fireEvent.click(
+      await screen.findByRole(
+        "button",
+        { name: "Continue to model profiles" },
+        { timeout: 6500 },
+      ),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Create implementation profile",
+      }),
+    );
     await screen.findByText(/Already configured as/);
-    const verifier = screen.getByRole("button", { name: "Create verifier profile" }).closest("form")!;
-    fireEvent.change(within(verifier).getByLabelText(/^Model/), { target: { value: "reviewer" } });
+    const verifier = screen
+      .getByRole("button", { name: "Create verifier profile" })
+      .closest("form")!;
+    fireEvent.change(within(verifier).getByLabelText(/^Model/), {
+      target: { value: "reviewer" },
+    });
     fireEvent.submit(verifier);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue to coding agent" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Continue to coding agent" }));
-    fireEvent.change(await screen.findByLabelText(/Expected installed version/), { target: { value: "1.2.3" } });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Continue to coding agent" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to coding agent" }),
+    );
+    fireEvent.change(
+      await screen.findByLabelText(/Expected installed version/),
+      { target: { value: "1.2.3" } },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the summary" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show the summary" }),
+    );
     expect(await screen.findByText(/Configuration is complete/)).toBeVisible();
     expect(screen.getByText("Requires operator qualification")).toBeVisible();
   }, 12000);
 
   it("refuses a duplicate verifier model before writing it", async () => {
-    renderWizard(readiness({ connection: endpoint, discovery: discovered,
-      implementation_profile: { id: "p1", model: "coder" } }));
-    const button = await screen.findByRole("button", { name: "Create verifier profile" });
+    renderWizard(
+      readiness({
+        connection: endpoint,
+        discovery: discovered,
+        implementation_profile: { id: "p1", model: "coder" },
+      }),
+    );
+    const button = await screen.findByRole("button", {
+      name: "Create verifier profile",
+    });
     const form = button.closest("form")!;
-    fireEvent.change(within(form).getByLabelText(/^Model/), { target: { value: "coder" } });
+    fireEvent.change(within(form).getByLabelText(/^Model/), {
+      target: { value: "coder" },
+    });
     fireEvent.submit(form);
-    expect(await screen.findByText("Choose different models for implementation and verification.")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Choose different models for implementation and verification.",
+      ),
+    ).toBeVisible();
     expect(write).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Continue to coding agent" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Continue to coding agent" }),
+    ).toBeDisabled();
   });
 
   it("preserves the interrupted draft through two confirmation expiries", async () => {
@@ -478,15 +583,27 @@ describe("setup transitions", () => {
       if (path === "/auth/reauthenticate") return {};
       throw new ApiError(403, "reauth_required", "Confirm identity");
     });
-    fireEvent.change(await screen.findByLabelText(/Connection name/), { target: { value: "My draft endpoint" } });
+    fireEvent.change(await screen.findByLabelText(/Connection name/), {
+      target: { value: "My draft endpoint" },
+    });
     for (let attempt = 0; attempt < 2; attempt += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Save endpoint" }));
-      fireEvent.change(await screen.findByLabelText(/Current password/), { target: { value: "my-password" } });
+      fireEvent.change(await screen.findByLabelText(/Current password/), {
+        target: { value: "my-password" },
+      });
       fireEvent.click(screen.getByRole("button", { name: "Confirm identity" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Save endpoint" })).toBeVisible());
-      expect(screen.getByLabelText(/Connection name/)).toHaveValue("My draft endpoint");
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Save endpoint" }),
+        ).toBeVisible(),
+      );
+      expect(screen.getByLabelText(/Connection name/)).toHaveValue(
+        "My draft endpoint",
+      );
       expect(screen.queryByText(/last change was not/)).toBeNull();
     }
-    expect(write.mock.calls.filter(([path]) => path === "/auth/reauthenticate")).toHaveLength(2);
+    expect(
+      write.mock.calls.filter(([path]) => path === "/auth/reauthenticate"),
+    ).toHaveLength(2);
   });
 });

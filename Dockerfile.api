@@ -1,0 +1,114 @@
+# One image for the API, the worker, the migration step and the credential
+# generator. They share a virtualenv and a source tree, so building four
+# identical images would only cost disk and time.
+#
+# The executor is deliberately absent. Its isolation depends on host systemd
+# primitives that a container cannot grant a child; see docs/adr/0006.
+
+# syntax=docker/dockerfile:1
+
+ARG PYTHON_VERSION=3.12
+
+# A Debian base rather than the distroless uv image: the roles and grants steps
+# run psql through /bin/bash, and a distroless image has no shell to run it in.
+# The uv tag is pinned inline because COPY --from cannot take an ARG.
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime-base
+COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /uvx /usr/local/bin/
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/opt/nachtlabs/.venv/bin:$PATH"
+
+FROM runtime-base AS builder
+WORKDIR /src
+ENV UV_PROJECT_ENVIRONMENT=/opt/nachtlabs/.venv
+
+# Dependency metadata first, so a source-only change does not re-resolve.
+COPY pyproject.toml uv.lock ./
+COPY packages/core/pyproject.toml packages/core/
+COPY apps/api/pyproject.toml apps/api/
+COPY apps/worker/pyproject.toml apps/worker/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --all-packages
+
+COPY packages/core packages/core
+COPY apps/api apps/api
+COPY apps/worker apps/worker
+COPY config/logging.json config/logging.json
+# --no-editable is load-bearing, not a preference. A default workspace install
+# is editable and records the *builder's* source paths in .pth files, so the
+# runtime image would import from /src, which does not exist there. Without this
+# the venv installs the three packages as real copies.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --all-packages --no-editable
+
+FROM runtime-base AS final
+# postgresql-client provides psql for the roles and grants steps, which apply the
+# reviewed least-privilege statement set that the application roles depend on.
+# Only the client is installed: no server, and no database in this image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
+
+# The service account in the image. The systemd units run these as dedicated
+# non-root accounts with their own writable state directory. A container gets
+# the same separation: one account, no root, nothing writable outside the paths
+# it is given at runtime.
+RUN groupadd --system --gid 9000 nachtlabs \
+ && useradd --system --uid 9000 --gid 9000 --home-dir /nonexistent \
+            --shell /usr/sbin/nologin nachtlabs \
+ && install -d -o nachtlabs -g nachtlabs -m 0750 /var/lib/nachtlabs/api \
+ && install -d -o nachtlabs -g nachtlabs -m 0750 /var/lib/nachtlabs/worker
+
+COPY --from=builder --chown=root:root /opt/nachtlabs/.venv /opt/nachtlabs/.venv
+COPY --from=builder --chown=root:root /src/packages/core /opt/nachtlabs/packages/core
+COPY --from=builder --chown=root:root /src/apps/api /opt/nachtlabs/apps/api
+COPY --from=builder --chown=root:root /src/apps/worker /opt/nachtlabs/apps/worker
+COPY --from=builder --chown=root:root /src/config /opt/nachtlabs/config
+# Entry points: alembic, the credential generator, and the operator scripts
+# that stay useful inside a container.
+COPY --chown=root:root scripts /opt/nachtlabs/scripts
+# Test definitions and the pytest config. Present so the integration suite can be
+# run against this image on the compose network, where it can reach PostgreSQL by
+# service name; postgres is deliberately not published to the host, so running
+# these from the host would require opening a port purely for the test run.
+COPY pyproject.toml /opt/nachtlabs/pyproject.toml
+COPY tests /opt/nachtlabs/tests
+COPY packages/core/tests /opt/nachtlabs/packages/core/tests
+RUN chown -R root:root /opt/nachtlabs \
+ && chmod -R go-w /opt/nachtlabs
+
+WORKDIR /opt/nachtlabs
+USER nachtlabs
+
+# Overridden per service in compose.yaml. The API is the only long-running
+# process that needs a port; health and the origin preflight are unauthenticated
+# GETs by design.
+CMD ["uvicorn", "nachtlabs_api.main:create_app", "--factory", \
+     "--host", "0.0.0.0", "--port", "8000", "--no-access-log", \
+     "--log-config", "config/logging.json"]
+
+# A separate target carrying the dev group, so the runtime image above stays free
+# of pytest and its plugins. Building the tests into the service image would
+# enlarge the deployed artifact for the benefit of a one-shot job.
+FROM runtime-base AS test
+COPY --from=builder --chown=root:root /opt/nachtlabs/.venv /opt/nachtlabs/.venv
+COPY --from=builder --chown=root:root /src/packages/core /opt/nachtlabs/packages/core
+COPY --from=builder --chown=root:root /src/apps/api /opt/nachtlabs/apps/api
+COPY --from=builder --chown=root:root /src/apps/worker /opt/nachtlabs/apps/worker
+COPY --from=builder --chown=root:root /src/config /opt/nachtlabs/config
+COPY --chown=root:root scripts /opt/nachtlabs/scripts
+COPY pyproject.toml uv.lock /opt/nachtlabs/
+COPY tests /opt/nachtlabs/tests
+COPY packages/core/tests /opt/nachtlabs/packages/core/tests
+ENV UV_PROJECT_ENVIRONMENT=/tmp/testenv \
+    UV_COMPILE_BYTECODE=0
+WORKDIR /opt/nachtlabs
+# Re-resolve with the dev group, which is what supplies pytest. The builder
+# installed the runtime set only, and --frozen needs the lockfile present to add
+# the dev group without re-resolving.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --all-packages --no-editable
+ENTRYPOINT []

@@ -1,5 +1,5 @@
-# Linux handoff: full source, testing deferred
-Current state: **NOT RUN**. Target Ubuntu 24.04, Python 3.12, Node 24, pnpm 10, PostgreSQL 16, systemd; no WSL/container requirement. Earlier checkpoint and M4 documents are historical; this is the current handoff.
+# Linux handoff: full source, source checks run
+Current state: source checks **PASS** as of 2026-09-28; deployment evidence **NOT RUN**. Target Ubuntu 24.04, Python 3.12, Node 24, pnpm 10, PostgreSQL 16, systemd; no WSL/container requirement. Earlier checkpoint and M4 documents are historical; this is the current handoff. Executed commands and their output are in [linux-verification-2026-09-28.md](../planning/linux-verification-2026-09-28.md).
 
 ## 1. Preserve and prepare
 Keep this source snapshot and its documents together. No commit is required or authorized. Follow linux-development.md and linux-systemd-deployment.md for native prerequisites and TLS. On the Linux host, generate real dependency lockfiles with the documented setup command. Do not install or start the executor yet.
@@ -23,7 +23,9 @@ On Linux, in the documented environment, run:
   `make test-e2e` needs `NACHTLABS_E2E_URL` pointing at an already-running isolated installation. On a host that already has `libnss3`/`libnspr4`/`libasound2` it needs nothing further. On an unprivileged build machine or in a container those are usually absent, Chromium then cannot launch, and every test fails with `error while loading shared libraries` while looking like an application fault; `make test-e2e` calls `scripts/browser-libs.sh`, which fetches only those three packages into the gitignored `.browser-libs` prefix and needs no root. To do it by hand: `export LD_LIBRARY_PATH="$(./scripts/browser-libs.sh)"`.
 - Start only API/worker/web, then make healthcheck. Exercise setup/login/MFA/themes/project/governance and service-key revocation.
 
-These are future operator instructions. None ran during authoring. Record actual output, runtime versions, failures and fixes. Resolve foundation errors before proceeding.
+These are operator instructions. The source-level subset of this list was executed on 2026-09-28 and passes: `make format-check`, `make lint`, `make typecheck`, `make build`, `make test` and `make api-client-check`. The remainder — `make secret-scan`, `make dependency-audit`, migrations, `make test-integration` and `make test-e2e` — did not run and needs the infrastructure described above. Record actual output, runtime versions, failures and fixes. Resolve foundation errors before proceeding.
+
+Note for the executor: the checks above were run under WSL2. That is sufficient for compilation, typing, linting and the unit/native/web suites, and is not evidence for any systemd, isolation, cgroup, broker or executor-qualification behavior below. Repeat the deployment-facing steps on the native host.
 
 ## 3. Offline target and native runtime
 Create a disposable **local** bare mirror from demo/repository using local Git on Linux. Keep it under /var/lib/nachtlabs-executor/mirrors, root-owned and non-writable by service users. Do not configure a remote for this fixture.

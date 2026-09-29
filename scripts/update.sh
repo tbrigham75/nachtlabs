@@ -122,6 +122,9 @@ UV_PROJECT_ENVIRONMENT="$NACHTLABS_ROOT/.venv" UV_PYTHON=/usr/bin/python3.12 UV_
   uv sync --locked --all-packages
 pnpm install --frozen-lockfile
 rm -rf -- "$NACHTLABS_ROOT/apps/web/.next" "$NACHTLABS_ROOT/apps/web/public/docs-assets"
+# public/ and public/docs-assets/ are gitignored, so neither is tracked in the
+# archive. Recreate the parents or cp -a below fails on a tree that never built.
+install -d "$NACHTLABS_ROOT/apps/web/public"
 cp -a "$stage/apps/web/.next" "$NACHTLABS_ROOT/apps/web/.next"
 cp -a "$stage/apps/web/public/docs-assets" "$NACHTLABS_ROOT/apps/web/public/docs-assets"
 # Recheck after promotion as well; never start a release on the wrong schema.

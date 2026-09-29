@@ -1,5 +1,5 @@
 # Upgrade, interruption and recovery
-Status: authored procedure; NOT RUN.
+Status: authored procedure. The update/reset/activation **shell orchestration** is now covered by executed checks under WSL2 (16 passing tests in `tests/native/test_maintenance_scripts.py`, including activation failure, interrupted-activation recovery and successful promotion). A real update against an installed deployment has **not** been run; that needs a native Ubuntu host with systemd, a live database and a real remote.
 
 ## Host-console scripts and configuration
 An installed deployment keeps its configuration in `/etc/nachtlabs`, not in the repository, and a
@@ -42,7 +42,8 @@ begin again:
 
 This empties the database, re-applies migrations **and runtime database permissions**, deletes the
 web build, rebuilds, and health-checks the restarted installation. The next page load offers Owner
-setup. These revised procedures and their regression tests are authored, NOT RUN.
+setup. These revised procedures and their regression tests are authored and were executed on 2026-09-28
+under WSL2; the reset and update flows against a real installed deployment remain untested.
 
 It checks everything before changing anything, and refuses unless it is root, the tree is
 `/opt/nachtlabs`, the working tree is clean, and a systemd unit is installed. It proves the **build

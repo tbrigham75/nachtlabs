@@ -92,6 +92,9 @@ export function LlmSetupScreen({ user }: { user: User }) {
   const [confirmed, setConfirmed] = useState(false);
   const [expired, setExpired] = useState(false);
   const [resumeStep, setResumeStep] = useState<Step | null>(null);
+  // The origin as typed, so a notice outside the endpoint form can tell an
+  // https entry from a cleartext one before anything has been saved.
+  const [draftBaseUrl, setDraftBaseUrl] = useState("");
   const ready = useQuery({
     queryKey: ["llm-readiness"],
     queryFn: () => api<LlmReadiness>("/llm-readiness"),
@@ -221,12 +224,16 @@ export function LlmSetupScreen({ user }: { user: User }) {
         </p>
       )}
       {/*
-        Two facts that are static and true of any https or private endpoint, and
-        that are otherwise discovered the hard way: a certificate this
-        installation does not trust is refused, and a private address is refused
-        for agent egress by the executor.
+        A certificate is only ever consulted for an https origin: the transport
+        builds no TLS context at all for cleartext. This notice therefore said
+        something false on the most common local configuration there is, so it is
+        scoped to the scheme that actually has a certificate. The saved connection
+        is authoritative when there is one; before that, the typed origin decides,
+        and nothing is claimed until an https:// has actually been entered.
       */}
-      {(state.connection === null || state.connection.loopback_pinned) && (
+      {(state.connection === null
+        ? draftBaseUrl.trim().toLowerCase().startsWith("https://")
+        : !state.connection.cleartext_endpoint) && (
         <p className="notice" role="status">
           <strong>
             Two things to know before an https endpoint can answer.
@@ -303,6 +310,7 @@ export function LlmSetupScreen({ user }: { user: User }) {
           <ConnectionStep
             existing={state.connection}
             allowPrivateHttp={allowPrivateHttp}
+            onDraftBaseUrl={setDraftBaseUrl}
             guard={guard}
             onDone={() => setStepAnd("discovery")}
           />
@@ -523,11 +531,13 @@ export function endpointProblems(input: EndpointInput): string[] {
 function ConnectionStep({
   existing,
   allowPrivateHttp,
+  onDraftBaseUrl,
   guard,
   onDone,
 }: {
   existing: LlmReadiness["connection"];
   allowPrivateHttp: boolean;
+  onDraftBaseUrl: (value: string) => void;
   guard: <T>(action: () => Promise<T>) => Promise<T>;
   onDone: () => void;
 }) {
@@ -590,6 +600,9 @@ function ConnectionStep({
           timeout_seconds: "15",
         }}
         label="Save endpoint"
+        onFieldChange={(name, value) => {
+          if (name === "base_url") onDraftBaseUrl(value);
+        }}
         submit={async (v) => {
           // Checked here so the operator is told what is wrong and how to fix
           // it, rather than receiving a refusal the API cannot explain.
@@ -770,7 +783,9 @@ function ProfilesStep({
   const [saved, setSaved] = useState<string[]>([]);
   const connection = state.connection;
   if (!connection?.active)
-    return <p className="notice error">Create an active model endpoint first.</p>;
+    return (
+      <p className="notice error">Create an active model endpoint first.</p>
+    );
   const known = state.discovery.models.map((m) => m.name);
   const makeModels = (role: string, current: string) => {
     const options = known.length
@@ -1072,9 +1087,9 @@ function Summary({ state, step }: { state: LlmReadiness; step: number }) {
         {state.complete
           ? "Configuration is complete, but nothing runs yet. "
           : "Configuration is incomplete. Finish the outstanding steps above. "}
-        Execution needs a root-owned qualification the
-        interface cannot perform: follow{" "}
-        <code>docs/operations/executor-qualification.md</code>, record it with{" "}
+        Execution needs a root-owned qualification the interface cannot perform:
+        follow <code>docs/operations/executor-qualification.md</code>, record it
+        with{" "}
         <code>
           sudo scripts/qualify-executor.py --evidence /path/report.md
           --confirm-linux-isolation-passed

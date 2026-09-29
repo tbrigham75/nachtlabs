@@ -1,0 +1,29 @@
+# Build context hygiene. Keeps host build output, secrets and the dev virtualenv
+# out of the image, so a stale .next or a local .env can never be baked in.
+.git
+.gitignore
+.venv
+**/.venv
+node_modules
+**/node_modules
+.next
+**/.next
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+test-results
+playwright-report
+.browser-libs
+*.log
+*.tsbuildinfo
+dist
+**/*.egg-info
+.env
+.env.*
+!.env.example
+# Real credentials never belong in an image. Generated at container start.
+config/nachtlabs.env

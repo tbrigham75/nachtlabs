@@ -63,6 +63,10 @@ def list_owners() -> int:
 
 
 def main() -> int:
+    # Root is checked before anything else: a non-root caller cannot read
+    # /etc/nachtlabs, so reporting missing configuration first would be wrong.
+    if os.geteuid() != 0:
+        raise SystemExit("Root console access is required")
     # An installed deployment keeps its configuration in /etc/nachtlabs, and a
     # bare `sudo python3 scripts/recover-owner.py` inherits nothing.
     require_operator_env()
@@ -84,8 +88,6 @@ def main() -> int:
     parser.add_argument("--name", default="Owner")
     parser.add_argument("--organization", default="NachtLabs")
     args = parser.parse_args()
-    if os.geteuid() != 0:
-        raise SystemExit("Root console access is required")
     if args.list_accounts:
         return list_owners()
     if not args.email:

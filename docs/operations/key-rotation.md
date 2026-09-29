@@ -8,7 +8,7 @@ Changing origin/IP/private/HTTP settings clears credentials. Do not restore a to
 
 ## Master key: offline Linux maintenance
 
-Not executed during authoring. Use a disposable installation first, with a verified encrypted pre-rotation backup and access to the old key. Stop API, worker, web and executor, and prevent other writers. Use the migration-role environment in a root shell, with all NACHTLABS variables exported:
+Status: NOT RUN against a live installation. This procedure has never been executed, and it is the most destructive routine here. Use a disposable installation first, with a verified encrypted pre-rotation backup and access to the old key. Stop API, worker, web and executor, and prevent other writers. Use the migration-role environment in a root shell, with all NACHTLABS variables exported:
 
 ```bash
 set -a

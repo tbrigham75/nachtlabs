@@ -1,0 +1,80 @@
+# The interface image. Built from the pinned toolchain, serving the Next.js
+# standalone output that scripts/build.sh assembles.
+#
+# next.config.ts sets output: "standalone", so the runtime stage carries only
+# the server and its traced dependencies, not the build toolchain.
+
+# syntax=docker/dockerfile:1
+
+ARG NODE_VERSION=24.21.0
+ARG PNPM_VERSION=10.0.0
+# next.config.ts reads this during the build, and the value is compiled into
+# .next/routes-manifest.json. It therefore has to be an ARG here rather than a
+# runtime environment variable: a runtime-only setting leaves the proxy pointing
+# at whatever default was present when the image was built, which is the
+# symptom of an interface that serves pages but cannot reach the API.
+ARG NACHTLABS_INTERNAL_API_URL=http://api:8000
+
+FROM node:${NODE_VERSION}-bookworm-slim AS base
+# A global ARG is not visible inside a build stage until it is re-declared, and
+# using it without that yields an empty value rather than an error. That produced
+# a rewrite destination of "/api/:path*" — the API rewriting to itself — which
+# silently serves the catch-all page instead of proxying.
+ARG NACHTLABS_INTERNAL_API_URL
+# corepack ships with Node, so pnpm is pinned to the engines field rather than
+# installed from a package registry at an unpinned version.
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NACHTLABS_INTERNAL_API_URL=${NACHTLABS_INTERNAL_API_URL}
+
+FROM base AS builder
+ARG PNPM_VERSION
+WORKDIR /src
+ENV CI=1
+
+# corepack enable links the shims onto PATH, which prepare alone does not do.
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm -v
+
+# Manifests first: pnpm install --frozen-lockfile is the only supported way to
+# materialise node_modules, and it must run before any source is copied.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/
+COPY packages/api-client/package.json packages/api-client/
+RUN pnpm install --frozen-lockfile
+
+COPY apps/web apps/web
+COPY packages/api-client packages/api-client
+COPY scripts/build.sh scripts/build.sh
+COPY scripts/common.sh scripts/common.sh
+
+# scripts/build.sh is the supported build path, not a bare `pnpm build`: it stages
+# the swagger assets into apps/web/public/docs-assets and copies the static and
+# public trees into the standalone output, which Next's tracer omits. This stage
+# needs the full install because those assets come out of node_modules.
+RUN bash scripts/build.sh
+
+FROM base AS final
+RUN groupadd --system --gid 9000 nachtlabs \
+ && useradd --system --uid 9000 --gid 9000 --home-dir /nonexistent \
+            --shell /usr/sbin/nologin nachtlabs
+
+WORKDIR /app
+# Next's standalone tracer already emits a self-contained server with the
+# workspace packages and node_modules it traced, so the runtime stage is the
+# builder's output copied across. pnpm deploy is not used: it requires
+# inject-workspace-packages=true, which would be a workspace-wide setting change
+# made purely to suit a container.
+COPY --from=builder --chown=nachtlabs:nachtlabs /src/apps/web/.next/standalone ./
+# scripts/build.sh already placed the static and public trees inside the
+# standalone output, because Next's tracer omits both, so nothing else is needed.
+# next.config.ts rewrites /api/* to NACHTLABS_INTERNAL_API_URL, so this is the
+# API's address on the compose network, never localhost.
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0 \
+    PORT=3035
+
+USER nachtlabs
+EXPOSE 3035
+CMD ["node", "server.js"]

@@ -1,7 +1,9 @@
 # Milestones 1–10 source handoff
-Date: 2026-09-25. Verification: **NOT RUN — deferred to operator Linux testing.**
+Date: 2026-09-25. Verification updated 2026-09-28 — see [linux-verification-2026-09-28.md](linux-verification-2026-09-28.md).
 
-The operator authorized coding through every milestone without interim testing and authorized storing milestone documents in this project. This supersedes the old M4 stop. No application, test, build, formatter, linter, type checker, migration, service, health check, scanner, or live integration was executed. No Git initialization, commit, remote operation or PR was performed.
+The operator authorized coding through every milestone without interim testing and authorized storing milestone documents in this project. This supersedes the old M4 stop.
+
+**Verification status as of 2026-09-28.** The source-level checks have now been executed on Linux and pass: lint, type, format, unit, native and web tests, the production build, and the API-client drift check. Four real defects were found and fixed in the process; they are described in the verification record. What has *not* been executed is everything requiring deployment infrastructure: integration and E2E tests, migrations against a real database, secret and dependency scans, and executor qualification. Those remain NOT RUN, and no acceptance row is marked passed.
 
 ## Source delivered in this continuation
 - M5: normalized UI/API/signed-webhook intake, project policy, immutable workflow versions, durable runs/events, Mission-aware plan generation and version-bound human decisions.
@@ -14,7 +16,7 @@ The operator authorized coding through every milestone without interim testing a
 See individual milestone-5 through milestone-10 reports and the 33-row acceptance matrix.
 
 ## Deliberate limits
-This is an **unqualified source handoff**, not a demonstrated end-to-end release. Dependencies are not installed; real lockfiles and generated API declarations still need the Linux pass. Formatting/type/build/runtime defects may remain.
+This is a **source-verified handoff, not a demonstrated end-to-end release.** Dependency locks and generated API declarations are current and verified. Runtime defects may still remain anywhere a real service, database or browser session is involved; the checks that ran do not cover those paths.
 
 Executor qualification defaults off. The root broker is a privileged trust boundary; API/worker/web remain non-root. Isolated job controls, runtime pins, provider CLI semantics, cgroup egress, cancellation and resource limits require actual Linux evidence before qualification.
 
@@ -25,4 +27,4 @@ The development adapter is a synthetic harness adapter, not a replacement for re
 Only verifier warnings may be accepted by an Owner when project policy explicitly enables that exception. Required checks, secrets, scope, missing criteria, failed verification and uncertainty cannot be waived. Scheduling, merge/deploy execution, distributed workers and concurrency above one remain disabled/deferred as planned.
 
 ## Next evidence
-Follow docs/operations/milestone-10-handoff.md and record results against a preserved source snapshot. Do not mark any acceptance row passed from reading source.
+Follow docs/operations/milestone-10-handoff.md and record results against a preserved source snapshot. The source-level gates listed in section 2 of that handoff now pass and can be treated as a baseline; the remaining targets need a real database, a running installation, a pinned scanner and a native Ubuntu host. Do not mark any acceptance row passed from reading source, and do not carry a WSL2 result over as native Linux deployment evidence.

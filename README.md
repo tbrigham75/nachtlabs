@@ -2,7 +2,7 @@
 
 A Linux-native, self-hosted control plane for governed AI software engineering.
 
-**Source authored through Milestone 10. All execution checks remain NOT RUN.** This is an unqualified source handoff for the operator’s upcoming Linux testing.
+**Source authored through Milestone 10, with the Linux source checks now run.** Lint, type, format, unit, native and web test checks, the production build and the API-client drift check all pass. Deployment, integration, E2E, migration and executor-qualification evidence is still outstanding, so this is not yet a demonstrated release. See the [verification record](docs/planning/linux-verification-2026-09-28.md) for the exact commands, results and environment.
 
 Start with the [full Linux handoff](docs/operations/milestone-10-handoff.md), [current status and limitations](docs/planning/milestone-10-status.md), [acceptance matrix](docs/planning/acceptance-matrix.md) and [results sheet](docs/planning/milestone-10-results.md). Milestone documents are stored under docs/planning; older checkpoint/M4 reports remain historical records.
 
@@ -17,9 +17,9 @@ Start with the [full Linux handoff](docs/operations/milestone-10-handoff.md), [c
 - Linux systemd/configuration/recovery/paired-backup tools, synthetic demo and authored test definitions.
 
 ## Boundaries
-Target Ubuntu Server 24.04 LTS x86-64, Python 3.12, Node.js 24 LTS, pnpm 10, PostgreSQL 16, systemd and Nginx. No WSL, Docker, Compose, Kubernetes or Redis requirement. Development here uses PowerShell on Windows.
+Target Ubuntu Server 24.04 LTS x86-64, Python 3.12, Node.js 24 LTS, pnpm 10, PostgreSQL 16, systemd and Nginx. Docker is optional and is not required: the control plane (API, worker, interface, database) can run from `compose.yaml`, while the **executor stays native systemd** because its isolation depends on host primitives a container cannot provide — see [ADR 0006](docs/adr/0006-container-deployment.md). Source authoring and the Linux checks run on WSL2, which is adequate for source checks but is not deployment evidence.
 
-No dependency installation, application execution, build, test, lint/type/format check, migration, service, health check, scan or live integration probe was performed. No Git initialization, commit or remote operation was performed. The organization’s remote Git restriction remains in force; product adapter source does not authorize live provider use.
+Source checks were run on 2026-09-28: lint, type, format, unit, native and web tests, the production build and the API-client drift check pass, as do 76 integration tests against a containerised PostgreSQL. The secret scan, dependency audit, E2E suite and executor qualification still need infrastructure this host does not have and remain NOT RUN. The organization's remote Git restriction remains in force; product adapter source does not authorize live provider use.
 
 API/worker/web use non-root service identities. The native broker is a separate privileged trust boundary; untrusted jobs use isolated DynamicUser services. Execution remains gated on a root-controlled catalog and actual operator qualification. A synthetic adapter does not establish real-agent safety.
 
@@ -77,7 +77,9 @@ does not match `NACHTLABS_PUBLIC_URL`; `make diagnose-setup` reports the exact m
 ## Operator commands
 make setup, make configure, make update, make diagnose-setup, make reset-first-run, make recover-owner, make format, make build, make migrate, make install-systemd, make healthcheck, make logs, make api-client, make test, make test-integration, make test-e2e, make lint, make typecheck, make format-check, make migration-check, make api-client-check, make secret-scan, make dependency-audit, make backup and make restore.
 
-Follow handoff ordering. Generate actual lockfiles and OpenAPI/TypeScript declarations on Linux; none were fabricated. The source-only review is recorded in docs/planning/source-review-m10.md.
+Follow handoff ordering. `make lint`, `make typecheck`, `make format-check`, `make build` and `make test` need only Node 24, pnpm 10, Python 3.12 and uv, and pass as of 2026-09-28. `make api-client-check` passes, so the committed OpenAPI schema and TypeScript declarations match the live API; regenerate with `make api-client` only when routes or schemas change. The remaining targets need a database, a running installation or a pinned scanner and remain NOT RUN. The source review is recorded in docs/planning/source-review-m10.md and the executed checks in docs/planning/linux-verification-2026-09-28.md.
+
+To run the control plane in containers, see [container deployment](docs/operations/container-deployment.md). To run it as native services instead, follow the handoff below.
 
 ## Documentation
 - [Workflow engine](docs/architecture/workflow-engine.md)
@@ -86,6 +88,7 @@ Follow handoff ordering. Generate actual lockfiles and OpenAPI/TypeScript declar
 - [Manual regression](docs/architecture/regression-workflows.md)
 - [API routes](docs/api/workflows.md)
 - [Executor qualification](docs/operations/executor-qualification.md)
+- [Container deployment](docs/operations/container-deployment.md)
 - [Upgrade and recovery](docs/operations/upgrade-and-recovery.md)
 - [Working agreement](docs/contributing.md)
 

@@ -16,7 +16,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="operator-run Linux shell checks")
 ROOT = Path(__file__).resolve().parents[2]
 
-STUB = r'''
+STUB = r"""
 import json
 import os
 import sys
@@ -104,7 +104,7 @@ elif tool == "python":
         (home / "database-reset").touch()
 elif tool == "sleep":
     pass
-'''
+"""
 
 
 @pytest.fixture
@@ -120,8 +120,12 @@ def installed(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         '"$EUID"': '"${TEST_EUID}"',
     }
     for name in (
-        "common.sh", "maintenance-common.sh", "reset-first-run.sh", "update.sh",
-        "recover-update.sh", "maintenance_db.py",
+        "common.sh",
+        "maintenance-common.sh",
+        "reset-first-run.sh",
+        "update.sh",
+        "recover-update.sh",
+        "maintenance_db.py",
     ):
         source = (ROOT / "scripts" / name).read_text()
         for old, new in replacements.items():
@@ -141,10 +145,18 @@ def installed(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         path.chmod(0o755)
     (root / "apps/web/.next").mkdir(parents=True)
     (root / "apps/web/.next/bundle").write_text("old")
+    # A real installed tree has already run build.sh, which creates this
+    # gitignored directory. Its absence is what the update.sh regression covers.
+    (root / "apps/web/public/docs-assets").mkdir(parents=True)
+    (root / "apps/web/public/docs-assets/swagger-ui.css").write_text("old")
     (root / "release.txt").write_text("old")
     shutil.copytree(root, tmp_path / "target")
-    env = {**os.environ, "PATH": f"{tmp_path}/bin:{os.environ['PATH']}",
-           "TEST_AREA": str(tmp_path), "TEST_EUID": "0"}
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}/bin:{os.environ['PATH']}",
+        "TEST_AREA": str(tmp_path),
+        "TEST_EUID": "0",
+    }
     env.pop("NACHTLABS_ENV_FILE", None)
     return root, env
 
@@ -152,10 +164,15 @@ def installed(tmp_path: Path) -> tuple[Path, dict[str, str]]:
 def run_script(installed: tuple[Path, dict[str, str]], name: str, failure: str = ""):
     root, env = installed
     return subprocess.run(
-        ["bash", str(root / "scripts" / name), "--yes"] if name == "update.sh"
+        ["bash", str(root / "scripts" / name), "--yes"]
+        if name == "update.sh"
         else ["bash", str(root / "scripts" / name)],
-        input="RESET\n", capture_output=True, text=True, timeout=30,
-        env={**env, "FAILURE": failure}, cwd=root,
+        input="RESET\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**env, "FAILURE": failure},
+        cwd=root,
     )
 
 
@@ -176,7 +193,9 @@ def test_reset_restores_grants_before_starting_services(installed) -> None:
     result = run_script(installed, "reset-first-run.sh")
     assert result.returncode == 0, result.stderr
     calls = events(installed)
-    grants = next(i for i, event in enumerate(calls) if event[0] == "python" and event[2:3] == ["grants"])
+    grants = next(
+        i for i, event in enumerate(calls) if event[0] == "python" and event[2:3] == ["grants"]
+    )
     start = next(i for i, event in enumerate(calls) if event[:2] == ["systemctl", "start"])
     assert grants < start
 
@@ -221,8 +240,12 @@ def test_failed_activation_requires_recovery_and_restores_runtime(installed) -> 
     assert reset.returncode != 0
     assert not (root.parent / "database-reset").exists()
     recovered = subprocess.run(
-        ["bash", str(pending / "recover-update.sh")], env=env, cwd=root,
-        capture_output=True, text=True, timeout=30,
+        ["bash", str(pending / "recover-update.sh")],
+        env=env,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert recovered.returncode == 0, recovered.stderr
     assert (root / "release.txt").read_text() == "old"
@@ -241,6 +264,16 @@ def test_successful_update_activates_prepared_bundle(installed) -> None:
     assert built < stopped
 
 
+def test_update_activates_when_the_gitignored_public_directory_is_absent(installed) -> None:
+    """apps/web/public is gitignored, so a tree that never built lacks it entirely."""
+    root, _ = installed
+    shutil.rmtree(root / "apps/web/public")
+    result = run_script(installed, "update.sh")
+    assert result.returncode == 0, result.stderr
+    assert (root / "apps/web/.next/bundle").read_text() == "new"
+    assert (root / "apps/web/public/docs-assets").is_dir()
+
+
 def test_recovery_of_interruption_before_snapshot_does_not_require_an_archive(installed) -> None:
     root, env = installed
     result = run_script(installed, "update.sh", "stop")
@@ -248,8 +281,12 @@ def test_recovery_of_interruption_before_snapshot_does_not_require_an_archive(in
     pending = root.parent / "maintenance/update-pending"
     assert not (pending / "snapshot-ready").exists()
     recovered = subprocess.run(
-        ["bash", str(pending / "recover-update.sh")], env=env, cwd=root,
-        capture_output=True, text=True, timeout=30,
+        ["bash", str(pending / "recover-update.sh")],
+        env=env,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert recovered.returncode == 0, recovered.stderr
     assert (root / "release.txt").read_text() == "old"

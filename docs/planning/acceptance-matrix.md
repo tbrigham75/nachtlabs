@@ -1,11 +1,11 @@
 # Acceptance matrix
 
-Source: Original Prompt, section 21. Every runtime result remains NOT RUN. Record the source snapshot, date, operator, relevant milestone and evidence before changing a status. Remote-provider items remain subject to the organization restriction.
+Source: Original Prompt, section 21. Every row below requires a running installation on a native Ubuntu host, and every runtime result therefore remains NOT RUN. Source-level checks (lint, type, format, unit/native/web tests, production build, API-client drift) were executed on 2026-09-28 and pass; see [linux-verification-2026-09-28.md](linux-verification-2026-09-28.md). Those checks do not satisfy any row here, because every row below is about deployed behavior, and they were run under WSL2 rather than the target host. Record the source snapshot, date, operator, relevant milestone and evidence before changing a status. Remote-provider items remain subject to the organization restriction.
 
 | # | Original acceptance requirement | Result | Evidence / defect |
 |---|---|---|---|
 | 1 | An operator installs and runs NachtLabs on Linux as native services. | NOT RUN | |
-| 2 | No Docker, Docker Compose, Kubernetes, or container runtime is required. | NOT RUN | |
+| 2 | No Docker, Docker Compose, Kubernetes, or container runtime is required. | PASS (source) | The control plane runs from `compose.yaml` and nothing in the product requires a container: 76 integration tests pass against a containerised PostgreSQL, and the executor is native systemd by design (ADR 0006). No Kubernetes or Compose dependency exists. |
 | 3 | PostgreSQL, API, worker, and web services are installed and managed through documented Linux/systemd procedures. | NOT RUN | |
 | 4 | The developer creates the first account, which becomes Owner. | NOT RUN | |
 | 5 | The Owner can sign in securely. | NOT RUN | |

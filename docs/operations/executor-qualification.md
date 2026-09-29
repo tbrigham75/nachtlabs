@@ -1,5 +1,5 @@
 # Native executor qualification
-Status: NOT RUN. This is a procedure, not an assertion that systemd settings provide proven isolation.
+Status: NOT RUN. This is a procedure, not an assertion that systemd settings provide proven isolation. It must be executed on a native Ubuntu 24.04 host; the authoring environment is WSL2, and a WSL2 run would prove nothing about DynamicUser isolation, cgroup limits or the broker's mount-namespace handoff.
 
 The small root broker performs local mirror reads, candidate hashing, trusted Git operations and systemd dispatch. It shares the host mount namespace so transient jobs see its bounded tmpfs mounts. Do not add PrivateTmp/ProtectSystem/other mount-namespace settings to the broker without redesigning that handoff. The API/worker cannot invoke arbitrary systemd commands. Untrusted agent/check processes run in separate DynamicUser units with a curated RootDirectory.
 

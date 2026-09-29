@@ -25,12 +25,19 @@ export function Form({
   initial = {},
   submit,
   label = "Save",
+  onFieldChange,
   children,
 }: {
   fields: Field[];
   initial?: Record<string, string>;
   submit: (values: Record<string, string>) => Promise<void>;
   label?: string;
+  /*
+    Reports a field as the operator types it, so a screen outside the form can
+    react to what has been entered. react-hook-form keeps its own onChange and
+    runs this alongside it, so validation and submission are unaffected.
+  */
+  onFieldChange?: (name: string, value: string) => void;
   children?: React.ReactNode;
 }) {
   const prefix = useId();
@@ -91,7 +98,10 @@ export function Form({
           {field.options ? (
             <select
               id={`${prefix}-${field.name}`}
-              {...register(field.name)}
+              {...register(field.name, {
+                onChange: (event: React.ChangeEvent<HTMLSelectElement>) =>
+                  onFieldChange?.(field.name, event.target.value),
+              })}
               aria-describedby={`${prefix}-${field.name}-help`}
             >
               {field.options.map((o) => (
@@ -104,7 +114,10 @@ export function Form({
             <textarea
               id={`${prefix}-${field.name}`}
               rows={4}
-              {...register(field.name)}
+              {...register(field.name, {
+                onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  onFieldChange?.(field.name, event.target.value),
+              })}
               aria-describedby={`${prefix}-${field.name}-help`}
             />
           ) : (
@@ -113,7 +126,10 @@ export function Form({
               type={field.type ?? "text"}
               step={field.type === "number" ? "any" : undefined}
               autoComplete={field.type === "password" ? "new-password" : "off"}
-              {...register(field.name)}
+              {...register(field.name, {
+                onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                  onFieldChange?.(field.name, event.target.value),
+              })}
               aria-describedby={`${prefix}-${field.name}-help`}
             />
           )}

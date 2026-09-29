@@ -1,7 +1,10 @@
 # Weekend review fixes — 2026-09-28
 
-Status: source changes and regression checks authored. All execution checks NOT RUN.
-The user approved the six-part fix plan; the source-only working agreement remains in force.
+Status: source changes and regression checks authored, then **executed** later the same day.
+See [linux-verification-2026-09-28.md](linux-verification-2026-09-28.md) for the run itself. This document remains the record of what the six-part fix changed and why.
+The user approved the six-part fix plan; the source-only working agreement was in force when this was written and has since been superseded by [contributing.md](../contributing.md).
+
+**Post-authoring outcome.** The authored checks were run and two real defects surfaced, both now fixed: `scripts/update.sh` could not activate a bundle when the gitignored `apps/web/public` parent was absent, and `scripts/recover-owner.py` reported a configuration error to a non-root caller instead of the root requirement. Three of the files changed here were also unformatted and are now formatted. The LLM setup fixes in items 3–5 are covered by the 15 passing `apps/web/tests/llm-setup.test.tsx` cases.
 
 ## Implemented scope
 
@@ -60,5 +63,4 @@ and update/recovery with a deliberately interrupted activation. After a schema m
 second update still refuses until the target migration is actually applied. Record commands,
 results and any host-specific failures here before claiming runtime acceptance.
 
-No builds, tests, linters, type checks, format checks, migrations, services, network probes or remote
-Git operations were executed during this change. No commit was created.
+Accurate as of authoring this change: no builds, tests, linters, type checks, format checks, migrations, services, network probes or remote Git operations were executed while writing it. The checks were executed afterwards, under WSL2, with results in [linux-verification-2026-09-28.md](linux-verification-2026-09-28.md); the deployment steps above still need a native Ubuntu host.

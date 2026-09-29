@@ -1,0 +1,339 @@
+# NachtLabs control plane: API, worker, interface and PostgreSQL.
+#
+# Scope is deliberate. The executor is NOT in this file and must not be added.
+# Its isolation depends on host systemd primitives — DynamicUser, RootDirectory
+# and cgroup-v2 BPF IP filtering — that a container cannot grant a child process,
+# so a containerized executor would be strictly less isolated and its
+# qualification would be unsatisfiable. See docs/adr/0006 and
+# docs/operations/executor-qualification.md.
+#
+# The native systemd path remains supported and is still the right answer for a
+# host you administer. This file is for the control plane, development, and the
+# integration suite.
+#
+# First start:
+#
+#     NACHTLABS_LAN_ORIGIN=http://<server-ip>:3035 docker compose up -d
+#     docker compose logs init
+#
+# The operator's only input is the origin. Credentials are generated into the
+# config volume on first start and never enter the repository or an image layer.
+
+name: nachtlabs
+
+# Every long-running service reads its environment from inside the config volume
+# rather than through compose's env_file. env_file is resolved on the host when
+# the file is parsed, which happens before the init container has generated
+# anything, so it cannot be used for a file that does not exist yet. The
+# in-container loader below reads the generated file and exports it instead.
+x-env: &env
+  entrypoint: ["/opt/nachtlabs/scripts/with-env.sh"]
+  volumes:
+    - config:/etc/nachtlabs:ro
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile.api
+  image: nachtlabs/api:local
+  restart: unless-stopped
+  environment:
+    NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+    NACHTLABS_ENV_FILE: /etc/nachtlabs/api.env
+  volumes:
+    - config:/etc/nachtlabs:ro
+  # Attached to the backend network only. Neither the API nor the worker is
+  # reachable from the host or the LAN; the interface is the sole entry point,
+  # which is the same shape as the loopback bindings in the systemd units.
+  networks:
+    - backend
+  depends_on:
+    postgres:
+      condition: service_healthy
+    grants:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    # 16 is the documented target. A major bump is a schema decision, not a
+    # packaging one, so the major version is pinned rather than floating.
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nachtlabs_migrator
+      POSTGRES_DB: nachtlabs
+      # The migrator is the schema owner. The password comes from the generated
+      # credential file, so the roles the application uses are created by the
+      # init and roles steps rather than by this image's entrypoint. That makes
+      # init a precondition: the file must exist before the server starts.
+      POSTGRES_PASSWORD_FILE: /etc/nachtlabs/credentials/postgres-superuser
+      NACHTLABS_TEST_DB: nachtlabs_test
+    volumes:
+      - config:/etc/nachtlabs:ro
+      - database:/var/lib/postgresql/data
+    networks:
+      - backend
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      # The application connects over TCP, so readiness has to be TCP readiness
+      # rather than a local socket check.
+      test:
+        - CMD-SHELL
+        - pg_isready -U nachtlabs_migrator -d nachtlabs -h 127.0.0.1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  init:
+    # Generates the master key, the bootstrap token, and one credential per role,
+    # then derives the origin. Idempotent: existing files are never replaced, so
+    # a restart is a no-op and rotation stays an explicit operator action.
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: nachtlabs/api:local
+    container_name: nachtlabs-init
+    user: "0:0"
+    command: ["python3", "scripts/container-init.py"]
+    environment:
+      NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+      NACHTLABS_WEB_PORT: "3035"
+      NACHTLABS_DB_HOST: postgres
+      NACHTLABS_DB_NAME: nachtlabs
+      NACHTLABS_TEST_DB_NAME: nachtlabs_test
+      NACHTLABS_LAN_ORIGIN: ${NACHTLABS_LAN_ORIGIN:-}
+    volumes:
+      - config:/etc/nachtlabs
+    networks:
+      - backend
+    restart: "no"
+
+  roles:
+    # Creates the runtime roles and both databases. The postgres entrypoint can
+    # only create one role, and the least-privilege model needs four, so this
+    # does it with the migrator's authority.
+    image: nachtlabs/api:local
+    container_name: nachtlabs-roles
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        source /etc/nachtlabs/migration.env
+        url="$$(cat "$$NACHTLABS_DATABASE_URL_FILE")"
+        # The credential file is a SQLAlchemy URL; psql wants libpq's form.
+        psql_url="$${url/postgresql+psycopg/postgresql}"
+        role_for() {
+          case "$$1" in
+            nachtlabs_api) echo api-db ;;
+            nachtlabs_worker) echo worker-db ;;
+            nachtlabs_executor) echo executor-db ;;
+          esac
+        }
+        for role in nachtlabs_api nachtlabs_worker nachtlabs_executor; do
+          file="$$(role_for "$$role")"
+          password="$$(sed -n 's|.*//'"$$role"':\([^@]*\)@.*|\1|p' "/etc/nachtlabs/credentials/$$file")"
+          if [ -z "$$password" ]; then
+            echo "could not read a password for $$role from $$file" >&2; exit 1
+          fi
+          # A heredoc, not a quoted inline string: the DO block needs dollar
+          # quoting, which does not survive being escaped through compose, the
+          # shell and psql -c at the same time.
+          {
+            echo "DO \$\$ BEGIN"
+            echo "  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='$$role') THEN"
+            echo "    CREATE ROLE $$role LOGIN PASSWORD '$$password';"
+            echo "  END IF;"
+            echo "END \$\$;"
+          } > /tmp/create-role.sql
+          psql "$$psql_url" -v ON_ERROR_STOP=1 -f /tmp/create-role.sql
+        done
+        psql "$$psql_url" -tAc "SELECT 1 FROM pg_database WHERE datname='nachtlabs_test'" | grep -q 1 \
+          || psql "$$psql_url" -v ON_ERROR_STOP=1 -c "CREATE DATABASE nachtlabs_test OWNER nachtlabs_migrator"
+        echo "roles and databases ready"
+    volumes:
+      - config:/etc/nachtlabs:ro
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  migrate:
+    <<: [*env, *app]
+    container_name: nachtlabs-migrate
+    user: "0:0"
+    restart: "no"
+    environment:
+      NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+      NACHTLABS_ENV_FILE: /etc/nachtlabs/migration.env
+    command:
+      - alembic
+      - -c
+      - apps/api/alembic.ini
+      - upgrade
+      - head
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+      roles:
+        condition: service_completed_successfully
+
+  schematest:
+    # The integration suite needs the same schema in its own database, which
+    # tests/conftest.py insists on by refusing any name not ending in _test.
+    # Applying the migrations a second time is the only way to give it one
+    # without pointing the destructive fixtures at the application database.
+    <<: [*env, *app]
+    container_name: nachtlabs-schema-test
+    user: "0:0"
+    restart: "no"
+    environment:
+      NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+      NACHTLABS_ENV_FILE: /etc/nachtlabs/test-migration.env
+    command:
+      - alembic
+      - -c
+      - apps/api/alembic.ini
+      - upgrade
+      - head
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  grants:
+    # scripts/grants.sql is the reviewed least-privilege statement set. It is
+    # applied to both databases, and it is idempotent, so this runs every start.
+    image: nachtlabs/api:local
+    container_name: nachtlabs-grants
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        export PGPASSWORD="$$(cat /etc/nachtlabs/credentials/postgres-superuser)"
+        for database in nachtlabs nachtlabs_test; do
+          psql -U nachtlabs_migrator -h postgres -d "$$database" \
+            -v ON_ERROR_STOP=1 -f /opt/nachtlabs/scripts/grants.sql > /dev/null
+          echo "grants applied to $$database"
+        done
+        # The integration fixture clears state with TRUNCATE between tests
+        # (tests/conftest.py), which needs table ownership. The application role
+        # deliberately has none, and must not: TRUNCATE is how the least-privilege
+        # model proves the API cannot remove audit history wholesale. So the
+        # privilege is added to the disposable test database only, where losing
+        # the data costs nothing. Never to the application database.
+        psql -U nachtlabs_migrator -h postgres -d nachtlabs_test -v ON_ERROR_STOP=1 <<'SQL' > /dev/null
+        GRANT TRUNCATE ON ALL TABLES IN SCHEMA public TO nachtlabs_api;
+        SQL
+        echo "test-database truncate grant applied"
+    volumes:
+      - config:/etc/nachtlabs:ro
+    networks:
+      - backend
+    depends_on:
+      schematest:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    <<: [*env, *app]
+    container_name: nachtlabs-api
+    command:
+      - uvicorn
+      - nachtlabs_api.main:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+      - --log-config
+      - config/logging.json
+    environment:
+      NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+      NACHTLABS_ENV_FILE: /etc/nachtlabs/api.env
+      # The operator opts in to provider egress explicitly. This file never
+      # enables it, so the switch is set here rather than in generated config.
+      NACHTLABS_INTEGRATION_NETWORK_ENABLED: ${NACHTLABS_INTEGRATION_NETWORK_ENABLED:-false}
+      NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE: ${NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE:-false}
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import urllib.request,sys
+          sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health/live",timeout=4).status==200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  worker:
+    <<: [*env, *app]
+    container_name: nachtlabs-worker
+    environment:
+      NACHTLABS_CONFIG_DIR: /etc/nachtlabs
+      NACHTLABS_ENV_FILE: /etc/nachtlabs/worker.env
+      NACHTLABS_INTEGRATION_NETWORK_ENABLED: ${NACHTLABS_INTEGRATION_NETWORK_ENABLED:-false}
+      NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE: ${NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE:-false}
+    command:
+      - python3
+      - -m
+      - nachtlabs_worker.main
+    # The worker is the process that dials the model provider, so the egress
+    # switch must match the API's or discovery and planning disagree.
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        # Baked into the proxy rewrite at build time; see Dockerfile.web.
+        NACHTLABS_INTERNAL_API_URL: http://api:8000
+    image: nachtlabs/web:local
+    container_name: nachtlabs-web
+    restart: unless-stopped
+    # The interface has no application configuration of its own beyond the API
+    # address, so its values are literals here rather than a generated file.
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3035"
+      NACHTLABS_INTERNAL_API_URL: http://api:8000
+    # The only published port on the whole stack.
+    ports:
+      - "${NACHTLABS_WEB_BIND:-0.0.0.0}:3035:3035"
+    networks:
+      - backend
+    working_dir: /app/apps/web
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch("http://127.0.0.1:3035/login").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  # Credentials and generated env. Back this up; losing it loses the master key,
+  # which is what makes stored secrets unreadable.
+  config:
+  database:

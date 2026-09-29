@@ -9,3 +9,5 @@ Systemd reads EnvironmentFile as manager; web receives no master key/DB connecti
 Updates: drain email, back up, retain source/locks, install/build reviewed source, migrate under the owner role, review grants, restart and check readiness. No implicit migrations or package updates run during service startup. Do not blindly downgrade schemas. The operator manages local snapshots/file transfer, with no remote Git/CI or containers.
 
 Current full-source handoff: milestone-10-handoff.md. The installer also provisions an executor unit but does not start or qualify it. API/worker/web remain non-root; the separate root broker and its transient DynamicUser jobs require executor-qualification.md before use.
+
+The control plane may instead run from `compose.yaml`; see container-deployment.md. The executor is not in that file and must not be added to it — its `DynamicUser`, `RootDirectory` and cgroup-v2 BPF `IPAddressAllow` settings have no container equivalent, so a containerized executor would be less isolated and its qualification unsatisfiable (ADR 0006). Both deployment paths are supported; choose one.

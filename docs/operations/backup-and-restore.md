@@ -1,8 +1,8 @@
 # Encrypted backup and restore
 
-The M4 format contains a PostgreSQL custom dump, active master key, retained-key JSON and schema/key metadata inside an age-encrypted tar. Protect the separate age private identity. Runtime verification has not run.
+The M4 format contains a PostgreSQL custom dump, active master key, retained-key JSON and schema/key metadata inside an age-encrypted tar. Protect the separate age private identity. Runtime verification has not run: the backup, restore and rotation paths have not been executed against a live database on a native host. Note that the schema must now be 0003, not 0002 — see [upgrade and recovery](upgrade-and-recovery.md).
 
-Stop services and prevent encryption rotation/migrations during a snapshot. In the administrator shell set NACHTLABS_ENV_FILE=/etc/nachtlabs/migration.env, NACHTLABS_BACKUP_DIR and NACHTLABS_BACKUP_RECIPIENT, then invoke make backup. The schema must be 0002. Credentials pass to PostgreSQL tools through environment, not process arguments. Temporary plaintext stays in a private directory; protect its storage. The final archive appears only after encryption completes.
+Stop services and prevent encryption rotation/migrations during a snapshot. In the administrator shell set NACHTLABS_ENV_FILE=/etc/nachtlabs/migration.env, NACHTLABS_BACKUP_DIR and NACHTLABS_BACKUP_RECIPIENT, then invoke make backup. The schema must be 0003: `scripts/snapshot.py` refuses any other revision, because the format records the schema it was taken at and restore rejects a mismatch. Credentials pass to PostgreSQL tools through environment, not process arguments. Temporary plaintext stays in a private directory; protect its storage. The final archive appears only after encryption completes.
 
 For restore, create an EMPTY alternate database ending _restore, owned by the migration identity. Set NACHTLABS_RESTORE_ARCHIVE, NACHTLABS_RESTORE_IDENTITY, NACHTLABS_RESTORE_DATABASE, NACHTLABS_RESTORE_KEY_OUTPUT and NACHTLABS_RESTORE_PREVIOUS_KEYS_OUTPUT. Both key destinations must be new, different paths in protected directories. Invoke make restore.
 

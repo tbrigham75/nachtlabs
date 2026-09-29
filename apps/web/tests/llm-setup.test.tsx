@@ -133,7 +133,7 @@ describe("llm setup wizard", () => {
         screen.getByRole("button", { name: "Save endpoint" }),
       ).toBeEnabled(),
     );
-    const summary = screen.getByText(/What is .Pinned server IP/);
+    const summary = screen.getByText(/What is this second address box for/);
     expect(summary).toBeInTheDocument();
     const explainer = summary.closest("details")!;
     // It must actually open, not just exist: a hidden explanation is no
@@ -143,12 +143,95 @@ describe("llm setup wizard", () => {
     // The phone-book analogy is the whole reason this is understandable.
     expect(text).toMatch(/phone book/i);
     // The security reason, in the words an operator would use.
-    expect(text).toMatch(/secret/i);
     // And the practical disambiguation, which is the part people get wrong.
     expect(text).toMatch(/model server/i);
     expect(text).toMatch(/not this machine/i);
     // A name is refused here, so say so before they try it.
     expect(text).toMatch(/not type a name|needs looking up/i);
+    // And it now says the box fills itself, which is the change the operator
+    // actually noticed.
+    expect(text).toMatch(/fills itself/i);
+  });
+
+  it("fills the pinned address itself when the origin is a number", async () => {
+    // The duplication the field used to force: the origin already named a
+    // number, and the server refuses a pin that differs, so the box was pure
+    // ceremony. It must now fill in and stop asking.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    const origin = screen.getByLabelText(/Model endpoint origin/);
+    fireEvent.change(origin, {
+      target: { value: "http://192.168.7.20:11434" },
+    });
+    const pin = screen.getByLabelText(/Pinned server IP/) as HTMLInputElement;
+    await waitFor(() => expect(pin.value).toBe("192.168.7.20"));
+    expect(pin).toHaveAttribute("readonly");
+    // The help says where the value came from, so the fill is not a mystery.
+    expect(screen.getByText(/Taken from the origin above/)).toBeInTheDocument();
+  });
+
+  it("asks for the address only when the origin is a name", async () => {
+    // A name and an address do different jobs, so this is the case the box is
+    // for and it has to be answerable.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText(/Model endpoint origin/), {
+      target: { value: "https://ollama.lan" },
+    });
+    // The label names what the address has to mean.
+    expect(
+      screen.getByLabelText(/The address ollama.lan means right now/),
+    ).toBeInTheDocument();
+    const pin = screen.getByLabelText(
+      /The address ollama.lan means right now/,
+    ) as HTMLInputElement;
+    expect(pin).not.toHaveAttribute("readonly");
+    // The value that was derived for the numeric default is deliberately left
+    // there: the operator very likely means the same machine, and a name
+    // arriving mid-edit is a change of how it is spelled, not of which machine.
+    // The box becomes theirs to correct, and the required rule still applies.
+    expect(pin.value).toBe("127.0.0.1");
+  });
+
+  it("releases the pinned address when the origin stops being a number", async () => {
+    // Switching mid-edit must not strand a value the interface wrote and the
+    // operator never chose, and must not clear what they typed either.
+    renderWizard(readiness());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Save endpoint" }),
+      ).toBeEnabled(),
+    );
+    const origin = screen.getByLabelText(/Model endpoint origin/);
+    fireEvent.change(origin, { target: { value: "https://ollama.lan" } });
+    const pin = screen.getByLabelText(
+      /The address ollama.lan means right now/,
+    ) as HTMLInputElement;
+    fireEvent.change(pin, { target: { value: "10.9.8.7" } });
+    // Back to a number: the interface takes the pin over again.
+    fireEvent.change(origin, { target: { value: "http://10.9.8.7:11434" } });
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText(/Pinned server IP/) as HTMLInputElement).value,
+      ).toBe("10.9.8.7"),
+    );
+    // And to a name again: the operator's own value is still there.
+    fireEvent.change(origin, { target: { value: "https://ollama.lan" } });
+    expect(
+      (
+        screen.getByLabelText(
+          /The address ollama.lan means right now/,
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("10.9.8.7");
   });
 
   it("warns permanently about a cleartext endpoint that is not loopback", async () => {

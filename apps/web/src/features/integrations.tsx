@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, write, type User } from "@nachtlabs/api-client";
-import { isCleartextOffHost } from "./endpoint-address";
+import { derivePin, isCleartextOffHost } from "./endpoint-address";
 import {
   Action,
   Badge,
@@ -192,6 +192,14 @@ function ConnectionEditor({
   provider?: string;
   save: (body: unknown) => Promise<void>;
 }) {
+  // The origin as typed, so an origin written as a number fills the pin itself
+  // rather than asking for the same value twice. A saved connection is seeded
+  // from its own base_url, so editing one that uses a name keeps the pin it was
+  // configured with instead of having it derived away.
+  const [originDraft, setOriginDraft] = useState(
+    value?.base_url ?? "https://api.github.com",
+  );
+  const pinHost = derivePin(originDraft);
   const fields: Field[] = [
     { name: "name", label: "Connection name", required: true, max: 120 },
     {
@@ -210,9 +218,19 @@ function ConnectionEditor({
     },
     {
       name: "address",
-      label: "Pinned server IP",
+      // As in the wizard: the label and help follow whether the origin is a
+      // number or a name. pinHost is non-null exactly when the origin is a
+      // number, which is when the value is derived and the box is a readback.
+      label:
+        pinHost === null
+          ? "Pinned server IP"
+          : `The address ${pinHost} means right now`,
       required: true,
-      help: "Administrator-approved numeric IP. TLS still verifies the hostname. An IP change requires an explicit settings update.",
+      readOnly: pinHost !== null,
+      help:
+        pinHost === null
+          ? "Administrator-approved numeric IP. TLS still verifies the hostname. An IP change requires an explicit update."
+          : "Taken from the origin above. Nothing looks the name up, so nothing can change what it means later.",
     },
     {
       name: "allow_private",
@@ -252,6 +270,12 @@ function ConnectionEditor({
           allow_http: String(value?.allow_http ?? false),
           timeout_seconds: String(value?.timeout_seconds ?? 15),
           active: String(value?.active ?? true),
+        }}
+        // Only while the origin names a number. Dropping the entry releases the
+        // field, so the operator's own value survives a switch to a name.
+        derivedValues={pinHost === null ? undefined : { address: pinHost }}
+        onFieldChange={(name, fieldValue) => {
+          if (name === "base_url") setOriginDraft(fieldValue);
         }}
         submit={async (v) =>
           save({

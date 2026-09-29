@@ -14,6 +14,14 @@ export interface Field {
   max?: number;
   help?: string;
   options?: { value: string; label: string }[];
+  /*
+    Shown but not editable, because something else supplies the value. Used for
+    a field the interface derives from another one. `readOnly` rather than
+    `disabled`: a disabled control is skipped by assistive technology and is
+    omitted from the submission, which would hide a value the operator needs to
+    see and check.
+  */
+  readOnly?: boolean;
 }
 
 // A parent may pause submission to obtain a fresh identity confirmation while
@@ -26,6 +34,7 @@ export function Form({
   submit,
   label = "Save",
   onFieldChange,
+  derivedValues,
   children,
 }: {
   fields: Field[];
@@ -38,6 +47,16 @@ export function Form({
     runs this alongside it, so validation and submission are unaffected.
   */
   onFieldChange?: (name: string, value: string) => void;
+  /*
+    Values the parent supplies rather than the operator, for fields the screen
+    derives from another one. The form stays uncontrolled: these are written into
+    the existing form state with setValue, so a parent that derives from a draft
+    does not have to own every keystroke or lose the rest of the form on
+    re-render. Nothing is set unless a name is present here, so a field stops
+    being derived the moment the parent drops it and the operator's own value
+    stays put.
+  */
+  derivedValues?: Record<string, string>;
   children?: React.ReactNode;
 }) {
   const prefix = useId();
@@ -57,10 +76,22 @@ export function Form({
     setError,
     resetField,
     clearErrors,
+    setValue,
   } = useForm<Record<string, string>>({
     defaultValues: initial,
     resolver: zodResolver(z.object(shape)),
   });
+  // Write parent-derived values into the form as they change. Keyed on the
+  // individual names and values rather than the object, so a caller passing an
+  // inline literal does not re-render and rewrite every field on every render.
+  const derivedEntries = Object.entries(derivedValues ?? {});
+  const derivedKey = derivedEntries
+    .map(([name, value]) => `${name}=${value}`)
+    .join(";");
+  useEffect(() => {
+    for (const [name, value] of derivedEntries) setValue(name, value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derivedKey, setValue]);
   const [rejected, setRejected] = useState<string[]>([]);
   return (
     <form
@@ -126,6 +157,8 @@ export function Form({
               type={field.type ?? "text"}
               step={field.type === "number" ? "any" : undefined}
               autoComplete={field.type === "password" ? "new-password" : "off"}
+              readOnly={field.readOnly === true}
+              aria-readonly={field.readOnly === true || undefined}
               {...register(field.name, {
                 onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
                   onFieldChange?.(field.name, event.target.value),

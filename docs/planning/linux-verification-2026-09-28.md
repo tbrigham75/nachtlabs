@@ -226,3 +226,16 @@ they are the checks that actually matter for deployment:
 
 No acceptance row is marked passed from this pass. The source is in a demonstrably
 cleaner state than the documents claimed, but runtime deployment remains unverified.
+
+## End-to-end suite, re-run after the pinned-address change
+
+`pnpm test:e2e` passes 49 of 50 against the running container stack. The single skip is
+`governance.spec.ts`, which signs in as a real Owner and skips only when
+`NACHTLABS_E2E_EMAIL` is unset. On an installation an operator has already initialised,
+either supply a disposable account to run it or accept the skip. A stale credential for an
+account that no longer exists fails rather than skipping, which is the intended behaviour.
+
+A run with credentials for an account removed by a reinitialisation reports failures that
+have nothing to do with the code under test. The distinction matters: it was traced to the
+absent account before the pin change was cleared, and reproduced with the change stashed
+out, rather than being assumed from a green-looking count.

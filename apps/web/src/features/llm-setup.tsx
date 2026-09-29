@@ -29,6 +29,8 @@ import {
   type Field,
 } from "@/components/ui";
 import {
+  derivePin,
+  originName,
   isGlobalIp,
   isLoopbackIp,
   parseIp,
@@ -63,6 +65,11 @@ const steps: { id: Step; title: string }[] = [
   { id: "agent", title: "Coding agent" },
   { id: "done", title: "Summary" },
 ];
+
+// The origin the form starts on, and the value the pin derives from before the
+// operator types anything. Named so the form default and the derivation seed are
+// the same string rather than two literals that can drift apart.
+const DEFAULT_ORIGIN = "http://127.0.0.1:11434";
 
 const booleans = [
   { value: "false", label: "No" },
@@ -542,36 +549,39 @@ export function endpointProblems(input: EndpointInput): string[] {
 function PinExplainer() {
   return (
     <details className="notice">
-      <summary>What is “Pinned server IP”, and why do I type it twice?</summary>
+      <summary>What is this second address box for?</summary>
       <p>
         <strong>In short:</strong> the address above says <em>where to go</em>,
-        and this one says <em>exactly which machine that is</em>. They are
-        usually the same text, and that is normal.
+        and this one says <em>exactly which machine that is</em>.
       </p>
       <p>
-        <strong>Think of a name in a phone book.</strong> If you call “Ollama”,
-        somebody looks the name up in a book to find a number. The lookup
-        happens again every single time, and anyone who can edit that book can
-        quietly change which number you reach. A “pin” is a phone number written
-        down once, so there is no lookup to tamper with.
+        <strong>If you typed a number above, this box fills itself in</strong>{" "}
+        and you do not need to touch it. The server would refuse a different
+        answer anyway, so asking you to type it twice could only ever produce a
+        copy. A number already is the machine, so there is nothing left to look
+        up.
       </p>
       <p>
-        That matters here because each request carries a secret. If NachtLabs
-        sent your model server’s key to whichever machine a name pointed at, and
-        something changed that name between one call and the next, the secret
-        would leave this installation. Pinning the address means the secret can
-        only ever be sent to the one machine you already approved.
+        <strong>
+          If you typed a name above, this box is the one that matters.
+        </strong>{" "}
+        Think of a name in a phone book. If you call “Ollama”, somebody looks
+        the name up in a book to find a number. The lookup happens again every
+        single time, and anyone who can edit that book can quietly change which
+        number you reach. A “pin” is a phone number written down once, so there
+        is no lookup to tamper with. A name is also what a secure certificate
+        can be issued for, which a number cannot easily be — so when you use a
+        name, this box is where you say what the name means <em>today</em>.
       </p>
       <p>
         <strong>Which address is it, then?</strong> It is the model server’s,
-        not this machine’s. If you typed <code>192.168.1.50</code> in the origin
-        above, put <code>192.168.1.50</code> here too. The two boxes are allowed
-        to disagree only when the origin uses a name instead of a number.
+        not this machine’s. If you typed <code>192.168.1.50</code> above, this
+        fills in as <code>192.168.1.50</code> on its own. On the host console,{" "}
+        <code>ip addr</code> shows the numbers.
       </p>
       <p>
-        <strong>Why can I not type a name here?</strong> Because a name would
-        need looking up, which is the thing being removed. Type the numbers
-        directly; on the host console, <code>ip addr</code> will show them.
+        <strong>Why can I not type a name in this box?</strong> Because a name
+        would need looking up, which is the thing being removed.
       </p>
     </details>
   );
@@ -591,6 +601,18 @@ function ConnectionStep({
   onDone: () => void;
 }) {
   const [created, setCreated] = useState<string | null>(null);
+  // The origin as typed, so the pin can be derived from it. A number there
+  // means the server refuses any pin that differs, so the field fills itself; a
+  // name means the two do different jobs and the operator has to supply the
+  // address. See derivePin.
+  //
+  // Seeded from the form's default rather than from `existing`: this screen
+  // deliberately creates a new endpoint instead of editing one, so the saved
+  // connection's origin is not what is being typed here, and readiness does not
+  // carry a base_url to seed from in the first place.
+  const [originDraft, setOriginDraft] = useState(DEFAULT_ORIGIN);
+  const pinHost = derivePin(originDraft);
+  const originHost = originName(originDraft);
   const fields: Field[] = [
     { name: "name", label: "Connection name", required: true, max: 120 },
     {
@@ -601,9 +623,25 @@ function ConnectionStep({
     },
     {
       name: "address",
-      label: "Pinned server IP",
+      // The label and the help both follow whether the origin is a number or a
+      // name, because that is what decides what this box is for.
+      //
+      // derivePin is non-null exactly when the origin is a number: the value is
+      // then derived and this is a readback of the origin, so it keeps the plain
+      // "Pinned server IP" label and the help says where the value came from.
+      // When the origin is a name there is nothing to derive, the operator is
+      // genuinely pinning, and the label has to say what the number must be the
+      // address of.
+      label:
+        pinHost !== null
+          ? "Pinned server IP"
+          : `The address ${originHost} means right now`,
       required: true,
-      help: "The model server's own number address, like 192.168.1.50. This is where the messages actually get sent — not an address on this machine. It has to match the address in the origin above. See the explanation below this form.",
+      readOnly: pinHost !== null,
+      help:
+        pinHost !== null
+          ? "Taken from the origin above. This is where the messages are sent — not an address on this machine."
+          : "Write the number this name points to today. Nothing looks the name up, so nothing can change what it means later. A name behind a CDN needs this refreshed when the address changes.",
     },
     {
       name: "allow_private",
@@ -643,15 +681,27 @@ function ConnectionStep({
         fields={fields}
         initial={{
           name: "Local Ollama",
-          base_url: "http://127.0.0.1:11434",
-          address: "127.0.0.1",
+          base_url: DEFAULT_ORIGIN,
+          // Left empty on purpose: the value arrives through derivedValues while
+          // the origin is a number, so seeding it here would only duplicate the
+          // one source of truth, and would leave a number sitting in the field
+          // if the origin were ever a name.
+          address: "",
           allow_private: "true",
           allow_http: "true",
           timeout_seconds: "15",
         }}
         label="Save endpoint"
+        // Only supplied while the origin names a number. Dropping the entry the
+        // moment it stops being derivable is what releases the field: the
+        // operator's own value is left alone rather than cleared, so switching
+        // from a number to a name mid-edit does not wipe what they typed.
+        derivedValues={pinHost === null ? undefined : { address: pinHost }}
         onFieldChange={(name, value) => {
-          if (name === "base_url") onDraftBaseUrl(value);
+          if (name === "base_url") {
+            setOriginDraft(value);
+            onDraftBaseUrl(value);
+          }
         }}
         submit={async (v) => {
           // Checked here so the operator is told what is wrong and how to fix

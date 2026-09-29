@@ -81,3 +81,67 @@ export function isCleartextOffHost(baseUrl: string, pins: string[]): boolean {
     return parsed === null || !isLoopbackIp(parsed);
   });
 }
+
+/**
+ * What the pinned address should be, given the origin being typed.
+ *
+ * The server already refuses a pin that disagrees with an origin written as a
+ * number (`transport.py`), so in that case the answer is the origin's own
+ * address and asking the operator to type it a second time could only ever
+ * produce a copy or a refusal. Deriving it here removes the second typing
+ * without relaxing anything: the mismatch rule stays in place, so a bug here
+ * would be caught rather than quietly accepted.
+ *
+ * An origin written as a *name* is the case the pin is really for, because the
+ * two do different jobs there. The socket connects to the pinned address while
+ * the certificate and the Host header use the name. So a name yields null, and
+ * the operator supplies the address it means right now.
+ *
+ * Null is also returned for an origin this cannot read, which includes the
+ * half-typed state while the operator is still editing. Returning null there
+ * rather than an empty string matters: the caller leaves the field alone
+ * instead of clearing what the operator already entered on every keystroke.
+ */
+export function derivePin(baseUrl: string): string | null {
+  const raw = baseUrl.trim();
+  if (!raw) return null;
+  // Take what a URL considers the host, so a port is not mistaken for part of
+  // the address and an IPv6 literal arrives without its brackets.
+  let host: string;
+  try {
+    host = new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+  if (!host) return null;
+  // A URL keeps the brackets around an IPv6 literal, and the pin is a bare
+  // address, so they have to come off. Leaving them on would produce a value
+  // parseIp rejects and the server refuses, which is worse than not deriving:
+  // the field would be filled with something the form then calls invalid.
+  const bare =
+    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  return parseIp(bare) === null ? null : bare;
+}
+
+/**
+ * The hostname an origin names, for use in a label or message.
+ *
+ * Null unless the origin actually parses and the host is a name, so a caller
+ * cannot show a half-typed fragment or a bare address in a sentence that is
+ * about a name. Used to phrase the pin field for the case where the operator
+ * really is pinning.
+ */
+export function originName(baseUrl: string): string | null {
+  const raw = baseUrl.trim();
+  if (!raw) return null;
+  let host: string;
+  try {
+    host = new URL(raw).hostname;
+  } catch {
+    return null;
+  }
+  if (!host) return null;
+  const bare =
+    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  return parseIp(bare) === null ? bare : null;
+}

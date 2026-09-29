@@ -107,7 +107,7 @@ Executed against Docker Engine 29.7.2 with Compose v5.4.0 on this WSL2 host:
 | Setup page served | **PASS** — first-run Owner form renders at `/setup` |
 | Worker heartbeat, no tick failures | **PASS** |
 | **Integration suite** | **PASS — 76 passed, 1 skipped** (previously all skipped for want of a database) |
-| Ollama reachable from a container | **PASS** — `192.168.2.171:11434` in 0.06s, 9 models |
+| Ollama reachable from a container | **PASS** — the operator's LAN endpoint in 0.06s, 9 models |
 | Ollama through the app's pinned transport | **PASS** — `PinnedJSON` discovery from inside the network |
 | Generated secrets absent from images | **PASS** — master key and bootstrap token in no image layer |
 | Operator's own address absent from the working tree | **PASS** after replacing it in one test file |
@@ -172,13 +172,53 @@ twentieth is 50/50. `next-env.d.ts` was also untracked during this work: `next d
 and `next build` write different content to it, so a host that had ever built had a
 permanently dirty tree and `update.sh` and `reset-first-run.sh` both refused to run.
 
+## Security and dependency scans (executed 2026-09-28)
+
+`make secret-scan` and `make dependency-audit` had never been run; both needed a pinned
+`gitleaks` and network access.
+
+| Check | Result |
+|---|---|
+| `make secret-scan` (gitleaks 8.30.1, pinned + checksum verified) | **PASS — no leaks** |
+| `make dependency-audit` (pip-audit) | **PASS** — no runtime advisories; 1 dev-only ID ignored by name |
+| `make dependency-audit` (pnpm audit --audit-level high) | **PASS** — 2 moderate, 0 high |
+
+`gitleaks` was verified in both directions before being trusted: a planted high-entropy
+key in the tree was reported as `generic-api-key`, and removing it returned the scan to
+clean. Its 9 default findings were all inside `.next/`, which `config/gitleaks.toml`
+allowlists as generated output.
+
+**Fixed.** `pip-audit` reported nine advisories against `cryptography` 46.0.7, seven of
+which are fixed in 48.0.1 or later, including one in the OpenSSL bundled with the wheel.
+The dependency is direct in `packages/core/pyproject.toml` and bounded `<47`, so the fixes
+were unreachable. The bound is now `<51` and the lock is resolved at 50.0.1. Only the AEAD
+interface is used (`AESGCM`, for stored secrets and evidence), which is unchanged across
+these majors, and the 76 integration tests — which encrypt and decrypt throughout — pass
+against it.
+
+**Accepted by name, not by omission.** The gate ignores exactly one advisory ID,
+`PYSEC-2026-1845` against `pytest` <9.0.3, which is dev-group only and never installed in
+the runtime image. It is ignored by ID rather than by package so a *new* advisory in a dev
+tool still fails the job, and the reason and the removal condition are recorded in the
+Makefile. `pnpm audit` reports two moderate advisories in `vitest` and `@vitest/mocker`,
+also development-only; the patched line is vitest 4, a major-version migration of the test
+runner that is not a proportionate response to a test-time path-traversal advisory. That is
+recorded here as a deliberate deferral rather than left to look like an oversight.
+
+## Continuous integration
+
+`.github/workflows/checks.yml` runs five independent jobs on every push and pull request:
+Python lint/types/unit, web lint/types/test/format, a generated-client drift check, the
+integration suite against a real PostgreSQL 16, and the secret plus dependency scans. Each
+gate in it was executed locally before being wired up, and the version pins match the ones
+`package.json` engines and the Dockerfiles require. The executor is not exercised, because
+its isolation cannot be validated anywhere but a bare-metal host and a CI runner is not one.
+
 ## Still NOT RUN
 
 These require infrastructure or operator authorization that was not available here, and
 they are the checks that actually matter for deployment:
 
-- `make secret-scan` — needs a pinned `gitleaks` binary.
-- `make dependency-audit` — `pip-audit` and `pnpm audit` not run.
 - The 4 `tests/native/test_executor_boundary.py` tests — skipped by design; they require
   explicit operator opt-in on a disposable Linux qualification host.
 - All systemd, executor qualification, backup/restore, key rotation and incident rows in

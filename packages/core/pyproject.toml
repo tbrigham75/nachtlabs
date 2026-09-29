@@ -5,7 +5,11 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "sqlalchemy>=2.0.38,<2.1", "psycopg[binary]>=3.2,<4",
   "pydantic[email]>=2.10,<3", "pydantic-settings>=2.8,<3",
-  "argon2-cffi>=23.1,<26", "cryptography>=44,<47", "pyotp>=2.9,<3",
+  # The upper bound is 51 rather than 47 because pip-audit reports advisories
+  # against 46.0.7 that are fixed in 48.0.1 and later, including one in the
+  # bundled OpenSSL. Only the AEAD interface is used (AES-GCM for stored secrets
+  # and evidence), and that interface is unchanged across these majors.
+  "argon2-cffi>=23.1,<26", "cryptography>=44,<51", "pyotp>=2.9,<3",
 ]
 [build-system]
 requires = ["hatchling>=1.27,<2"]

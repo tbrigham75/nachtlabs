@@ -1,0 +1,307 @@
+# Continuous integration for NachtLabs.
+#
+# The gates are the ones docs/contributing.md requires before a change is
+# complete, and each has been executed at least once before being wired here.
+# A gate that has never been run is a guess, and a guess in CI is worse than no
+# gate: it reports a red build for a reason nobody can reproduce.
+#
+# The executor is not exercised. Its isolation depends on host systemd
+# primitives, so it needs a bare-metal host and the 15-row qualification in
+# docs/operations/executor-qualification.md, which is operator work by design.
+# Nothing here can stand in for that, and nothing here claims to.
+
+name: checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the previous run. The jobs are
+# independent, so cancelling is safe.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python lint, types, unit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.19"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # --frozen proves the committed uv.lock is the resolution, and
+      # --all-packages installs the three workspace members rather than only the
+      # root project, which declares no code of its own.
+      - name: Install dependencies
+        run: uv sync --frozen --all-packages
+
+      - name: Ruff lint and format
+        run: |
+          uv run --no-sync ruff check --select I packages/core apps/api apps/worker tests scripts
+          uv run --no-sync ruff format --check packages/core apps/api apps/worker tests scripts
+
+      - name: Mypy
+        run: uv run --no-sync mypy
+
+      - name: Unit tests
+        run: uv run --no-sync pytest -m "not integration" -q
+
+  web:
+    name: Web lint, types, test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The versions package.json's engines field requires. A different major
+      # makes every pnpm-based command fail at startup, which reads like a source
+      # fault and is not one.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+
+      - name: Enable pnpm 10
+        run: corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm --filter @nachtlabs/web lint
+
+      - name: TypeScript
+        run: pnpm --filter @nachtlabs/web typecheck
+
+      - name: Vitest
+        run: pnpm --filter @nachtlabs/web test
+
+      - name: Prettier
+        run: pnpm format:check
+
+  generated:
+    name: Generated API client is current
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.19"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+
+      - name: Enable pnpm 10
+        run: corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --all-packages
+          pnpm install --frozen-lockfile
+
+      # Placeholder credentials for a schema export. Nothing connects to a
+      # database: the application builds its engine lazily, so an unreadable
+      # credential file does not stop the OpenAPI document being produced. The
+      # files are written to the runner's own temporary directory and never
+      # committed.
+      - name: Check the committed schema and declarations are current
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          printf 'postgresql+psycopg://placeholder:placeholder@127.0.0.1:5432/placeholder\n' > "$tmp/db"
+          printf 'postgresql+psycopg://placeholder:placeholder@127.0.0.1:5432/placeholder\n' > "$tmp/migration-db"
+          # 32 bytes, base64. Any value loads; only its length is validated.
+          printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n' > "$tmp/master-key"
+          {
+            echo "NACHTLABS_ENV=development"
+            echo "NACHTLABS_PUBLIC_URL=http://localhost:3000"
+            echo "NACHTLABS_ALLOWED_HOSTS=localhost,127.0.0.1"
+            echo "NACHTLABS_DATABASE_URL_FILE=$tmp/db"
+            echo "NACHTLABS_MIGRATION_DATABASE_URL_FILE=$tmp/migration-db"
+            echo "NACHTLABS_MASTER_KEY_FILE=$tmp/master-key"
+            echo "NACHTLABS_INTEGRATION_NETWORK_ENABLED=false"
+            echo "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED=false"
+          } > "$tmp/env"
+          export NACHTLABS_ENV_FILE="$tmp/env"
+          # Regenerate, then require the working tree to be unchanged. A
+          # difference here means the committed artifacts no longer describe the
+          # application, which is the drift this check exists to catch.
+          bash scripts/api-client.sh check
+          if ! git diff --quiet; then
+            echo "::error::Generated API client is stale. Run 'make api-client' and commit the result."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+  integration:
+    name: Integration suite
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.19"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+
+      - name: Enable pnpm 10
+        run: corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+      # PostgreSQL 16 is the documented target, and the suite is destructive
+      # within its own database. postgres:16 rather than :latest so a major
+      # bump is a reviewed change to this file.
+      - name: Start PostgreSQL 16
+        run: |
+          docker run -d --name nl-pg \
+            -e POSTGRES_USER=nachtlabs_migrator \
+            -e POSTGRES_PASSWORD=ci \
+            -e POSTGRES_DB=nachtlabs \
+            -p 5432:5432 postgres:16-bookworm
+          for _ in $(seq 1 30); do
+            if docker exec nl-pg pg_isready -U nachtlabs_migrator -d nachtlabs >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready"; docker logs nl-pg; exit 1
+
+      - name: Build the test image
+        run: docker build --target test -f Dockerfile.api -t nachtlabs/test:local .
+
+      - name: Apply migrations and grants to both databases
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          # The migrator owns the schema; the runtime roles are created by the
+          # same script the compose stack uses, so CI provisions exactly what a
+          # deployment provisions.
+          for role in nachtlabs_api nachtlabs_worker nachtlabs_executor; do
+            docker exec nl-pg psql -U nachtlabs_migrator -d nachtlabs -v ON_ERROR_STOP=1 -c \
+              "DO \$\$ BEGIN
+                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='$role') THEN
+                   CREATE ROLE $role LOGIN PASSWORD 'ci';
+                 END IF;
+               END \$\$;"
+          done
+          docker exec nl-pg psql -U nachtlabs_migrator -d nachtlabs -v ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE nachtlabs_test OWNER nachtlabs_migrator"
+          {
+            echo "NACHTLABS_ENV=test"
+            echo "NACHTLABS_PUBLIC_URL=http://testserver"
+            echo "NACHTLABS_ALLOWED_HOSTS=testserver"
+            echo "NACHTLABS_DATABASE_URL_FILE=$tmp/db"
+            echo "NACHTLABS_MIGRATION_DATABASE_URL_FILE=$tmp/migration-db"
+            echo "NACHTLABS_MASTER_KEY_FILE=$tmp/master-key"
+            echo "NACHTLABS_INTEGRATION_NETWORK_ENABLED=false"
+            echo "NACHTLABS_GIT_PROVIDER_NETWORK_ENABLED=false"
+          } > "$tmp/env"
+          printf 'postgresql+psycopg://nachtlabs_migrator:ci@127.0.0.1:5432/nachtlabs\n' > "$tmp/db"
+          printf 'postgresql+psycopg://nachtlabs_migrator:ci@127.0.0.1:5432/nachtlabs_test\n' > "$tmp/migration-db"
+          printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n' > "$tmp/master-key"
+          export NACHTLABS_ENV_FILE="$tmp/env"
+          uv run --no-sync alembic -c apps/api/alembic.ini upgrade head
+          # tests/conftest.py reads this one variable and refuses any database
+          # whose name does not end in _test, so the suite can never be pointed
+          # at the application database.
+          printf 'postgresql+psycopg://nachtlabs_api:ci@127.0.0.1:5432/nachtlabs_test\n' > "$tmp/test-db"
+          for database in nachtlabs nachtlabs_test; do
+            docker exec -e PGPASSWORD=ci nl-pg \
+              psql -U nachtlabs_migrator -d "$database" -v ON_ERROR_STOP=1 \
+              -f /dev/stdin < scripts/grants.sql > /dev/null
+          done
+          # The fixture clears state with TRUNCATE, which needs table ownership.
+          # The application role deliberately has none, and must not: that is how
+          # the least-privilege model proves the API cannot remove audit history
+          # wholesale. Test database only.
+          docker exec -e PGPASSWORD=ci nl-pg psql -U nachtlabs_migrator -d nachtlabs_test \
+            -v ON_ERROR_STOP=1 -c "GRANT TRUNCATE ON ALL TABLES IN SCHEMA public TO nachtlabs_api"
+          echo "$tmp" > /tmp/nl-ci-tmp
+
+      - name: Run the integration suite
+        run: |
+          set -euo pipefail
+          tmp="$(cat /tmp/nl-ci-tmp)"
+          export NACHTLABS_TEST_DATABASE_URL_FILE="$tmp/test-db"
+          docker run --rm --network host -v "$tmp:/ci" -v "$PWD":/src -w /src \
+            -e PATH=/tmp/testenv/bin:/usr/local/bin:/usr/bin:/bin \
+            nachtlabs/test:local pytest -m integration -q
+
+  security:
+    name: Secret and dependency scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, because a secret that was committed and later removed
+          # is still in the repository and still has to be rotated.
+          fetch-depth: 0
+
+      # Pinned to an exact release, not "latest": a scanner that changes under
+      # you turns a green build into an unexplained red one and vice versa.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: dir . --redact --config config/gitleaks.toml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.19"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.21.0"
+
+      - name: Enable pnpm 10
+        run: corepack enable && corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --all-packages
+          pnpm install --frozen-lockfile
+
+      # Same single exception as the Makefile target, and for the same reason:
+      # PYSEC-2026-1845 is against pytest, which is dev-group only and never
+      # installed in the runtime image. Anything else fails the job.
+      - name: Python dependency audit
+        run: uv run --no-sync pip-audit --ignore-vuln PYSEC-2026-1845
+
+      # --audit-level high: a low-severity advisory in a transitive dev
+      # dependency should not block a change, and a gate that cries wolf gets
+      # disabled.
+      - name: JavaScript dependency audit
+        run: pnpm audit --audit-level high

@@ -30,7 +30,7 @@ Network authorization and explicit exclusions:
 | Incidents/notifications/recommendation rollback | NOT RUN | |
 | Reboot/cancellation/crash reconciliation | NOT RUN | |
 | Paired encrypted backup/isolated restore/key rotation | NOT RUN | |
-| Secret/dependency scans | NOT RUN | `make secret-scan` needs a pinned gitleaks; `make dependency-audit` not executed |
+| Secret/dependency scans | PASS | gitleaks 8.30.1: no leaks (scanner verified with a planted secret). pip-audit: 9 cryptography advisories fixed by moving to 50.0.1; 1 dev-only pytest ID ignored by name. pnpm audit: 0 high, 2 moderate dev-only |
 | All 33 acceptance rows | NOT RUN | every row requires a deployed installation on the target host |
 
 Do not substitute a synthetic adapter result for real Hermes/OpenCode or provider acceptance. Record source fixes and rerun affected checks before changing a result.

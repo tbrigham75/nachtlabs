@@ -45,8 +45,20 @@ api-client-check:
 	bash scripts/api-client.sh check
 secret-scan:
 	bash scripts/secret-scan.sh
+# One advisory is ignored, by ID and not by package, so the exception is visible
+# and narrow:
+#
+#   PYSEC-2026-1845 - pytest < 9.0.3. pytest is in the dev group and is never
+#   installed in the runtime image, so nothing that reaches a customer is
+#   affected. The whole tree stays auditable on demand with:
+#
+#     uv run --no-sync pip-audit
+#
+# Everything else fails the gate, including anything new in a dev tool, which is
+# the point: a broad ignore would hide real findings as they appear. Raise the
+# bound in pyproject.toml when pytest 9 is adopted, and delete this line.
 dependency-audit:
-	uv run --no-sync pip-audit
+	uv run --no-sync pip-audit --ignore-vuln PYSEC-2026-1845
 	pnpm audit --audit-level high
 seed:
 	bash scripts/seed.sh

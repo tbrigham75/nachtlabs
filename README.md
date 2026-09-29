@@ -2,7 +2,7 @@
 
 A Linux-native, self-hosted control plane for governed AI software engineering.
 
-**Source authored through Milestone 10, with the Linux source checks now run.** Lint, type, format, unit, native and web test checks, the production build and the API-client drift check all pass. Deployment, integration, E2E, migration and executor-qualification evidence is still outstanding, so this is not yet a demonstrated release. See the [verification record](docs/planning/linux-verification-2026-09-28.md) for the exact commands, results and environment.
+**Source authored through Milestone 10, with the Linux checks and a container deployment now run.** Lint, type, format, unit, native, web, integration (76) and end-to-end (50) tests, the production build, the API-client drift check, the secret scan and the dependency audit all pass. Deployment against a real host, the dev-only advisories the audit still reports, and executor qualification remain outstanding, so this is not yet a demonstrated release. See the [verification record](docs/planning/linux-verification-2026-09-28.md) for the exact commands, results and environment.
 
 Start with the [full Linux handoff](docs/operations/milestone-10-handoff.md), [current status and limitations](docs/planning/milestone-10-status.md), [acceptance matrix](docs/planning/acceptance-matrix.md) and [results sheet](docs/planning/milestone-10-results.md). Milestone documents are stored under docs/planning; older checkpoint/M4 reports remain historical records.
 
@@ -87,7 +87,7 @@ To run the control plane in containers, see [container deployment](docs/operatio
 - [Git delivery](docs/architecture/git-workflow.md)
 - [Manual regression](docs/architecture/regression-workflows.md)
 - [API routes](docs/api/workflows.md)
-- [Executor qualification](docs/operations/executor-qualification.md)
+- [Executor qualification](docs/operations/executor-qualification.md) and its [runbook](docs/operations/executor-qualification-runbook.md)
 - [Container deployment](docs/operations/container-deployment.md)
 - [Upgrade and recovery](docs/operations/upgrade-and-recovery.md)
 - [Working agreement](docs/contributing.md)

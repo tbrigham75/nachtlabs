@@ -264,14 +264,37 @@ jobs:
           # is still in the repository and still has to be rotated.
           fetch-depth: 0
 
-      # Pinned to an exact release, not "latest": a scanner that changes under
-      # you turns a green build into an unexplained red one and vice versa.
-      - name: gitleaks
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          # The exact release the local scans were run against, with the published
+          # checksum verified rather than trusted.
+          version="8.30.1"
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          rm -f "$archive" gitleaks
+          gitleaks version
+
+      # Two scans, because they catch different things. `gitleaks git` reads every
+      # commit, so a secret that was committed and later deleted is still found --
+      # `dir` misses that, because by then the file is gone from the working tree
+      # and the secret is still in the history anyone can clone. `dir` then covers
+      # the checked-out tree, which is where an untracked or generated secret would
+      # be. Running only the action's default (a history scan) would not cover the
+      # tree; running only `dir` would not cover the history. Both are needed.
+      - name: gitleaks (history)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: dir . --redact --config config/gitleaks.toml
+          args: git . --redact --config config/gitleaks.toml
+
+      - name: gitleaks (working tree)
+        run: gitleaks dir . --redact --config config/gitleaks.toml
 
       - uses: astral-sh/setup-uv@v5
         with:

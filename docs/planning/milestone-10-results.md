@@ -21,7 +21,7 @@ Network authorization and explicit exclusions:
 | Format/lint/type checks | PASS (source) | `make format-check`, `make lint`, `make typecheck` clean; 87 files formatted, 56 typed |
 | Unit and PostgreSQL integration tests | Unit PASS, integration NOT RUN | `make test`: 100 passed, 79 skipped (unit + native + web). Integration needs a real `*_test` database and the three runtime roles |
 | Migration 0003 and least-privilege runtime roles | NOT RUN | needs a live PostgreSQL instance and migrator credential |
-| Browser accessibility/responsive/themes/E2E | NOT RUN | 48 Playwright tests collected; execution needs `NACHTLABS_E2E_URL` and a native host |
+| Browser accessibility/responsive/themes/E2E | PASS | 50 Playwright tests green against the container stack (2026-09-28). Fixing them exposed 2 product routing bugs and 6 defects in the tests themselves |
 | Authentication/MFA/CSRF/roles/scopes | NOT RUN | |
 | Workflow idempotency/approval/webhook boundaries | NOT RUN | |
 | Native executor qualification | NOT RUN | |

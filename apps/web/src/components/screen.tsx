@@ -51,6 +51,8 @@ function destination(input: {
   initialized: boolean | undefined;
   setupUnreachable: boolean;
   mfaRequired: boolean;
+  /* Whether the identity check has finished. */
+  authSettled: boolean;
 }): string | null {
   const {
     path,
@@ -59,6 +61,7 @@ function destination(input: {
     initialized,
     setupUnreachable,
     mfaRequired,
+    authSettled,
   } = input;
   // An unreadable setup status must not be treated as "no account exists", and
   // must not push a signed-in operator out of the application either.
@@ -71,12 +74,22 @@ function destination(input: {
   // reported "true", so the sign-in page keeps the setup link permanently and
   // /setup always explains itself. Nothing here can make registration
   // unreachable.
+  //
+  // An uninitialized installation must reach Owner setup, but only once the
+  // status is actually known. On the first render it is undefined, so a visitor
+  // at "/" fell past this rule into the signed-out rule below and was sent to
+  // /login, then to /setup on a second navigation: two commits for one decision,
+  // and a hop through a sign-in form that first-run visitors must never see.
   if (initialized === false && !signedInPath(path)) return "/setup";
   // Deliberately no "/setup" -> "/login" redirect. Bouncing a visitor off the
   // setup page looked like a broken refresh and hid the reason they could not
   // register. /setup now always explains itself, and creating an account is
   // still refused server-side with 409 setup_closed.
-  if (!publicPage && signedOut) return "/login";
+  //
+  // The signed-out rule is only trustworthy once the identity check has landed.
+  // Before that signedOut is false for everyone, so it would never fire and a
+  // signed-out visitor would be left on a private route.
+  if (!publicPage && signedOut && authSettled) return "/login";
   // The bare origin is not a page of its own. No dispatch branch matches "/"
   // because parts is empty, so an authenticated operator typing the site
   // address fell through to "Page not found" with no nav item highlighted and
@@ -84,7 +97,19 @@ function destination(input: {
   // MFA, uninitialized and signed-out rules so an anonymous or unconfigured
   // visitor still reaches /login or /setup first, and it uses replace so Back
   // cannot return to "/" and loop.
-  if (path === "/" && !signedOut) return "/overview";
+  //
+  // authSettled is what makes the signed-out rule above trustworthy. signedOut is
+  // derived from the 401, so on the first render it is false for *everyone*:
+  // without waiting for that check, a signed-out visitor at "/" matched this
+  // branch and was sent to the private overview before the 401 arrived, and the
+  // sign-in rule only corrected it on a second navigation. The redirect is an
+  // effect, so that wrong hop was committed and visible.
+  //
+  // A confirmed account is enough to allow the jump; the setup status is not
+  // consulted here. It is an org-level fact about whether an Owner exists, and
+  // a signed-in operator cannot be in an uninitialized installation, so waiting
+  // for it would only add a round trip before a page they are entitled to see.
+  if (path === "/" && authSettled && !signedOut) return "/overview";
   return null;
 }
 /**
@@ -162,6 +187,7 @@ export function Screen() {
     initialized,
     setupUnreachable,
     mfaRequired,
+    authSettled: !me.isPending,
   });
   useEffect(() => {
     if (target) router.replace(target);

@@ -322,6 +322,24 @@ test.describe("connecting a remote model endpoint", () => {
   // "Check the indicated fields", which names no field and says nothing about
   // what to change. The API cannot report why, so the form has to.
   async function mockProvider(page: import("@playwright/test").Page) {
+    // A created connection has to become visible in readiness, or the wizard
+    // stays on the endpoint step forever. The API reports what was saved, so the
+    // stub does too: this is what makes "save, then run the connection check"
+    // reachable at all.
+    let saved: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/llm-readiness", async (route) => {
+      // The default readiness shape plus whatever was just saved. This route is
+      // registered after the general **/api/v1/** mock, so it takes precedence
+      // and is the only place a saved connection can be reported.
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...empty,
+          ...(saved ? { connection: saved, connection_count: 1 } : {}),
+        }),
+      });
+    });
     await page.route("**/api/v1/integrations", async (route) => {
       if (route.request().method() === "GET")
         return route.fulfill({
@@ -331,8 +349,31 @@ test.describe("connecting a remote model endpoint", () => {
         });
       // Whatever the form sends, the server answers exactly as it does in
       // production: one opaque refusal, or a created connection.
+      //
+      // The server's own rule, not a shortcut: an https origin is always fine,
+      // and a cleartext one is accepted when the request carries both the
+      // loopback/HTTP permission and the private-address permission, which is
+      // what the wizard sends for an operator who has granted them. Mirroring
+      // only https:// made this stub refuse a shape the application accepts, so
+      // the "accepted once the installation permits cleartext" case could never
+      // reach the step it was asserting on.
       const body = JSON.parse(route.request().postData() ?? "{}");
-      const accepted = String(body.base_url ?? "").startsWith("https://");
+      const base = String(body.base_url ?? "");
+      const cleartext = base.startsWith("http://");
+      const accepted =
+        !cleartext || (body.allow_http === true && body.allow_private === true);
+      if (accepted) {
+        // Recorded in the shape the API returns, so the wizard sees an active
+        // endpoint and moves on to the connection check.
+        saved = {
+          id: "c1",
+          name: String(body.name ?? "Ollama"),
+          active: body.active === true,
+          version: 1,
+          loopback_pinned: false,
+          cleartext_endpoint: cleartext,
+        };
+      }
       return accepted
         ? route.fulfill({
             status: 201,
@@ -366,14 +407,69 @@ test.describe("connecting a remote model endpoint", () => {
     await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     // Names the field's rule, the offending address, and the way out.
+    //
+    // The form permits a private address by default, so with the installation's
+    // cleartext-to-private switch off this is the "not permitted" branch, not
+    // the "only loopback" one below. Both are correct for their own inputs; the
+    // earlier assertion expected the loopback wording while the form's default
+    // selected the other path, so it could never have passed.
     const error = page.locator("p.error");
     await expect(error).toContainText(
-      /Plain HTTP is only accepted for a loopback/,
+      /does not permit cleartext to a private address/,
     );
     await expect(error).toContainText("https://");
     await expect(error).toContainText("192.168.1.50");
+    // The setting to change is named, so the fix is actionable from the message.
+    await expect(error).toContainText(
+      "NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE",
+    );
     // And explicitly not the generic message it replaced.
     await expect(error).not.toContainText("Check the indicated fields");
+  });
+
+  test("the loopback-only wording appears when the private address is not permitted either", async ({
+    page,
+  }) => {
+    // The other cleartext branch. The private-address check runs first, so
+    // reaching this one means the pin is permitted and the *installation* is
+    // not: the private/loopback field stays on and only the installation-wide
+    // cleartext switch is off.
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Connection name/).fill("LAN Ollama");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    // Endpoint-level permission given, installation-level refused: this is the
+    // message that names the environment variable to change.
+    await expect(page.locator("p.error")).toContainText(
+      /does not permit cleartext to a private address/,
+    );
+  });
+
+  test("a private address with no permission at all is refused for that reason first", async ({
+    page,
+  }) => {
+    // With the pin permission off, that is the only problem worth reporting, and
+    // it must be reported instead of the cleartext one.
+    await mock(page, {});
+    await mockProvider(page);
+    await page.goto("/llm-setup");
+    await page.getByLabel(/Connection name/).fill("LAN Ollama");
+    await page
+      .getByLabel(/Model endpoint origin/)
+      .fill("http://192.168.1.50:11434");
+    await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
+    await page
+      .getByLabel(/Permit this private or loopback address/)
+      .selectOption("false");
+    await page.getByRole("button", { name: "Save endpoint" }).click();
+    await expect(page.locator("p.error")).toContainText(
+      /not publicly routable/,
+    );
   });
 
   test("nothing is sent to the API for a shape the server would refuse", async ({
@@ -465,8 +561,10 @@ test.describe("connecting a remote model endpoint", () => {
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
     await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
-    await page.getByLabel(/Permit this private or loopback address/).check();
-    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    // Both permission fields are Yes/No selects that already default to Yes for
+    // a loopback endpoint. Calling check() on them was a leftover from when they
+    // were checkboxes, and it threw "Not a checkbox or radio button" before the
+    // assertion under test was ever reached.
     await page.getByRole("button", { name: "Save endpoint" }).click();
     const error = page.locator("p.error");
     await expect(error).toContainText(
@@ -490,10 +588,20 @@ test.describe("connecting a remote model endpoint", () => {
       .getByLabel(/Model endpoint origin/)
       .fill("http://192.168.1.50:11434");
     await page.getByLabel(/Pinned server IP/).fill("192.168.1.50");
-    await page.getByLabel(/Permit this private or loopback address/).check();
-    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    // Both permission fields are Yes/No selects that already default to Yes for
+    // a loopback endpoint. Calling check() on them was a leftover from when they
+    // were checkboxes, and it threw "Not a checkbox or radio button" before the
+    // assertion under test was ever reached.
     await page.getByRole("button", { name: "Save endpoint" }).click();
     await expect(page.locator("p.error")).toHaveCount(0);
+    // Saving an endpoint leaves the operator on the endpoint step with a
+    // confirmation and a "Continue" button, as it must: a save is not a
+    // connection check. The step is advanced deliberately, so the test is
+    // exercising the operator's path rather than asserting that the wizard
+    // teleports past its own confirmation.
+    await page
+      .getByRole("button", { name: "Continue to connection check" })
+      .click();
     await expect(
       page.getByRole("button", { name: "Request connection check" }),
     ).toBeVisible();
@@ -518,7 +626,12 @@ test.describe("connecting a remote model endpoint", () => {
     await page.goto("/llm-setup");
     await page.getByLabel(/Model endpoint origin/).fill("http://93.184.216.34");
     await page.getByLabel(/Pinned server IP/).fill("93.184.216.34");
-    await page.getByLabel(/Permit HTTP for this loopback endpoint/).check();
+    // Made explicit rather than left to the default: this test is about what
+    // happens when cleartext is permitted, so the permission has to be visibly
+    // granted. It is a Yes/No select, not a checkbox, so check() would throw.
+    await page
+      .getByLabel(/Permit HTTP for this loopback endpoint/)
+      .selectOption("true");
     await page.getByRole("button", { name: "Save endpoint" }).click();
     await expect(page.locator("p.error")).toContainText(/never permitted/);
     await page.waitForTimeout(600);

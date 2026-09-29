@@ -8,6 +8,20 @@ import { test, expect } from "@playwright/test";
 
 const id = "00000000-0000-4000-8000-000000000002";
 
+/*
+  The address the browser is actually on, taken from the suite's own baseURL.
+
+  These specs assert that the banner names the address in use and stays absent
+  when the installation accepts it, so the "address in the browser" has to be the
+  real one. It used to be written as a literal 127.0.0.1:3000, which is correct
+  only for a dev server on the default port: run against a container on 3035 and
+  every one of these tests fails while the application is behaving correctly,
+  because the mock claims an origin the browser is not using.
+*/
+const HERE = process.env.NACHTLABS_E2E_URL
+  ? new URL(process.env.NACHTLABS_E2E_URL).origin
+  : "http://127.0.0.1:3000";
+
 async function mock(
   page: import("@playwright/test").Page,
   allowed: string[],
@@ -118,7 +132,7 @@ test.describe("permitted origins", () => {
     // The regression that matters most. preflight reports origin_accepted false
     // here because a same-origin GET carries no Origin header, so a banner
     // driven by that field would appear for a completely healthy installation.
-    await mock(page, ["http://127.0.0.1:3000", "https://nacht.lan"]);
+    await mock(page, [HERE, "https://nacht.lan"]);
     await page.goto("/overview");
     await expect(
       page.getByRole("heading", { name: "Engineering overview" }),
@@ -135,7 +149,7 @@ test.describe("permitted origins", () => {
     const banner = page.locator("p.notice.error");
     await expect(banner).toBeVisible();
     // The address in the browser, the addresses that work, and the setting.
-    await expect(banner).toContainText("127.0.0.1");
+    await expect(banner).toContainText(HERE.replace(/^https?:\/\//, ""));
     await expect(banner).toContainText("https://nacht.lan");
     await expect(banner).toContainText("NACHTLABS_ALLOWED_ORIGINS");
   });
@@ -143,7 +157,14 @@ test.describe("permitted origins", () => {
   test("a cleartext cookie is called out only when it is a live concern", async ({
     page,
   }) => {
-    await mock(page, ["http://localhost:3000"], false);
+    // The banner needs both halves: the browser is on an address the
+    // installation does not accept, *and* at least one accepted origin is
+    // plain HTTP. Permitting HERE and then expecting the cookie warning is
+    // contradictory, because with the current address accepted there is no
+    // mismatch to report. The case that does exist is a mismatched browser on an
+    // installation whose permitted set is cleartext, which is what this now
+    // mocks.
+    await mock(page, ["http://nacht.lan", "http://10.1.1.4:3035"], false);
     await page.goto("/overview");
     await expect(page.getByText(/cannot be marked Secure/)).toBeVisible();
   });

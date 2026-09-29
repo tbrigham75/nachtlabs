@@ -4,6 +4,12 @@ import { test, expect } from "@playwright/test";
 // uninitialized installation needs its own database.
 const id = "00000000-0000-4000-8000-000000000002";
 
+// The address the browser is really on, so the mocked preflight cannot claim an
+// origin the suite is not using. See the same note in origins.spec.ts.
+const HERE = process.env.NACHTLABS_E2E_URL
+  ? new URL(process.env.NACHTLABS_E2E_URL).origin
+  : "http://localhost:3000";
+
 async function mock(
   page: import("@playwright/test").Page,
   initialized: boolean,
@@ -77,9 +83,12 @@ async function mockSetup(
       return route.fulfill({
         status: 200,
         contentType: "application/json",
+        // The reported origin is where the browser actually is. A literal here
+        // made the mock disagree with the real address on any other port, which
+        // is a test failure that looks exactly like an origin-diagnosis bug.
         body: JSON.stringify({
-          origin: "http://localhost:3000",
-          expected: "http://localhost:3000",
+          origin: HERE,
+          expected: HERE,
           origin_accepted: true,
           setup_token_required:
             options.tokenRequired === true && options.refuseToken !== true,

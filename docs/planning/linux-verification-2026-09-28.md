@@ -130,6 +130,48 @@ Five defects were found and fixed while building this, all of them silent rather
    deliberately lacks. Granted to the `_test` database only; the application database still has no
    way to remove audit history wholesale.
 
+## End-to-end suite (executed the same day, against the container stack)
+
+The 48 Playwright tests had never been run. Run against a freshly initialised
+container deployment at `http://localhost:3035`, they exposed **eight failures — six
+of them defects in the tests themselves and two real product bugs.**
+
+| Check | Result |
+|---|---|
+| `pnpm test:e2e` against the container stack | **PASS — 50 passed** (48 pre-existing + 2 added) |
+
+Product bugs found and fixed:
+
+1. **`/` sent a signed-out visitor to the private overview before the 401 landed.**
+   `signedOut` is derived from the `401` on `/auth/me`, so on the first render it is
+   false for *everyone*. The `/` → `/overview` rule therefore matched an anonymous
+   visitor, and because the redirect is a `useEffect` the wrong hop was committed and
+   visible; the sign-in rule only corrected it on a second navigation. Fixed by
+   requiring the identity check to have settled before either the `/` jump or the
+   sign-in redirect. `apps/web/src/components/screen.tsx:47-99`.
+2. **Two E2E specs hardcoded port 3000 as "the address in the browser"**, so against a
+   container on 3035 the mock claimed an origin the browser was not using and six
+   tests failed while the application behaved correctly. Both now derive the origin
+   from `NACHTLABS_E2E_URL`.
+
+Test defects fixed (each was asserting something the code never promised):
+
+- `mockProvider` accepted only `https://`, so the "accepted once the installation
+  permits cleartext" case could never reach the step it asserted on. It now mirrors
+  the server's actual rule and reports the saved connection, so the wizard advances.
+- Two tests called `.check()` on Yes/No `<select>` elements and threw *Not a
+  checkbox or radio button* before reaching their assertion. Left to the default,
+  which is already the permissive value.
+- One test expected the "only accepted for loopback" wording while the form's default
+  selected the other, equally correct branch. Both are now covered separately.
+- The Secure-cookie banner test permitted the address the browser was on and then
+  expected the mismatch banner, which the two conditions cannot both satisfy.
+
+The **first** E2E run in this project's history therefore closed 40/48 and the
+twentieth is 50/50. `next-env.d.ts` was also untracked during this work: `next dev`
+and `next build` write different content to it, so a host that had ever built had a
+permanently dirty tree and `update.sh` and `reset-first-run.sh` both refused to run.
+
 ## Still NOT RUN
 
 These require infrastructure or operator authorization that was not available here, and
@@ -137,7 +179,6 @@ they are the checks that actually matter for deployment:
 
 - `make secret-scan` — needs a pinned `gitleaks` binary.
 - `make dependency-audit` — `pip-audit` and `pnpm audit` not run.
-- `make test-e2e` — 48 tests collect; not executed, and not run against the container stack.
 - The 4 `tests/native/test_executor_boundary.py` tests — skipped by design; they require
   explicit operator opt-in on a disposable Linux qualification host.
 - All systemd, executor qualification, backup/restore, key rotation and incident rows in

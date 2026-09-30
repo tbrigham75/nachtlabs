@@ -173,10 +173,25 @@ export class NachtLabs {
         });
       } catch (cause) {
         // A network failure is indistinguishable from a request that reached the
-        // API and was lost, which is exactly the case the idempotency key covers.
-        if (attempt >= 4) throw cause;
-        await this.sleep(backoff(attempt));
-        continue;
+        // API and was lost, which is exactly the case the idempotency key covers,
+        // so this is retried.
+        if (attempt < 4) {
+          await this.sleep(backoff(attempt));
+          continue;
+        }
+        // Node's fetch reports every transport problem as "fetch failed", with
+        // the real reason attached as a cause. A model handed that cannot act on
+        // it: it does not say which host, or whether the port is closed, or that a
+        // name did not resolve. Say all of it.
+        const reason = describeCause(cause);
+        const failure = new Error(
+          `Could not reach the NachtLabs API at ${url.origin} after ${attempt} attempts: ${reason}. ` +
+            `Check NACHTLABS_URL, and that this host can route to it.`,
+        ) as ApiError;
+        failure.status = 0;
+        failure.code = "unreachable";
+        failure.retryable = false;
+        throw failure;
       }
       if (response.ok) return (await response.json()) as T;
 
@@ -277,3 +292,22 @@ export function backoff(attempt: number): number {
 }
 
 export { KNOWN_ERRORS };
+
+/**
+ * Node reports every transport problem as `fetch failed` and hides the reason in
+ * a `cause`. The reason is what tells an operator whether the host is wrong, the
+ * port is closed, or a name did not resolve, so it is worth digging out.
+ */
+function describeCause(cause: unknown): string {
+  const err = cause as { cause?: unknown; message?: string };
+  const inner = err?.cause as { code?: string; message?: string } | undefined;
+  if (inner?.code === "ECONNREFUSED")
+    return "the connection was refused, so nothing is listening on that port";
+  if (inner?.code === "ENOTFOUND" || inner?.code === "EAI_AGAIN")
+    return "the host name did not resolve";
+  if (inner?.code === "ETIMEDOUT" || inner?.code === "UND_ERR_CONNECT_TIMEOUT")
+    return "the connection timed out";
+  if (inner?.code === "ECONNRESET") return "the connection was reset";
+  if (inner?.message) return inner.message;
+  return err?.message ?? "an unknown transport error";
+}

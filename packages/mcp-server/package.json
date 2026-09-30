@@ -14,7 +14,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/core": "^2.2.0",

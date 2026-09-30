@@ -1,0 +1,75 @@
+# The MCP server, deployed on its own host.
+#
+# This is deliberately a separate compose file rather than a service in the main
+# one. The server holds a write-scoped NachtLabs API key and is the only client of
+# the API, which is the point: that key exists on this machine and never travels
+# to an agent. Adding it to the main stack would put a network-facing, credential-
+# holding service inside the same compose project as the installation, and one
+# `docker compose down` on the wrong host would take the agent bridge down with it.
+#
+# Deploy:
+#
+#   docker compose -f compose.mcp.yaml up -d --build
+#   bash scripts/mcp-verify.sh http://<this-host>:3036
+#
+# Credentials come from files, never from the environment: an environment variable
+# is visible in `docker inspect` and in the process list. See
+# docs/operations/mcp-server.md for minting and rotating them.
+
+name: nachtlabs-mcp
+
+services:
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    image: nachtlabs/mcp:local
+    container_name: nachtlabs-mcp
+    restart: unless-stopped
+    ports:
+      # Bound to all interfaces because hermes reaches it from another box. On a
+      # host with more than one interface, restrict this to the address hermes uses
+      # and set NACHTLABS_MCP_BIND to match, so the surface is not wider than the
+      # agent needs. See docs/operations/mcp-server.md.
+      - "${NACHTLABS_MCP_PUBLISH:-0.0.0.0}:${NACHTLABS_MCP_PORT:-3036}:3036"
+    environment:
+      # Where the NachtLabs API is, from this host's point of view. A bearer
+      # request needs no Origin and no CSRF token, so this is the whole
+      # configuration.
+      NACHTLABS_URL: ${NACHTLABS_URL:?set NACHTLABS_URL to the NachtLabs API origin}
+      NACHTLABS_API_KEY_FILE: /run/secrets/nachtlabs-api-key
+      NACHTLABS_MCP_TOKEN_FILE: /run/secrets/nachtlabs-mcp-token
+      NACHTLABS_MCP_BIND: 0.0.0.0
+      NACHTLABS_MCP_PORT: "3036"
+      # Optional. The API key is already bound to a set of projects and refuses
+      # anything else with a 404; setting this turns a mistake into a local error
+      # that names the configuration instead.
+      NACHTLABS_PROJECT_IDS: ${NACHTLABS_PROJECT_IDS:-}
+      NACHTLABS_POLL_INTERVAL_MS: ${NACHTLABS_POLL_INTERVAL_MS:-3000}
+      NACHTLABS_MAX_WAIT_MS: ${NACHTLABS_MAX_WAIT_MS:-900000}
+    volumes:
+      # Read-only. The container never writes a credential, and it is the only
+      # holder of the API key on this host.
+      - ${NACHTLABS_MCP_SECRET_DIR:-/etc/nachtlabs-mcp}/api-key:/run/secrets/nachtlabs-api-key:ro
+      - ${NACHTLABS_MCP_SECRET_DIR:-/etc/nachtlabs-mcp}/mcp-token:/run/secrets/nachtlabs-mcp-token:ro
+    # No secrets, no depends_on: this is the whole service. The healthcheck is
+    # already declared in the image, and it deliberately does not touch the API,
+    # so a slow upstream cannot turn into a restart loop.
+    security_opt:
+      # Belt and braces alongside the image's own non-root user: this container
+      # has no business starting new processes, loading modules, or using ptrace.
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # Node writes nothing else, and a read-only root turns a filesystem-escape
+      # bug into a much smaller problem.
+      - /tmp:size=16m
+    logging:
+      driver: json-file
+      options:
+        # A polling agent and a chatty client produce steady traffic; unbounded
+        # logs fill a disk.
+        max-size: "10m"
+        max-file: "3"

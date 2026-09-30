@@ -26,6 +26,10 @@ test-integration:
 	bash scripts/test.sh integration
 test-e2e:
 	bash scripts/test.sh e2e
+test-mcp-live:
+	: "$${NACHTLABS_MCP_LIVE_URL:?Provide the deployed MCP server URL}"
+	: "$${NACHTLABS_MCP_LIVE_TOKEN_FILE:?Provide the file holding the MCP server token}"
+	pnpm --filter @nachtlabs/mcp-server exec vitest run --config vitest.live.config.ts
 lint:
 	bash scripts/lint.sh
 typecheck:

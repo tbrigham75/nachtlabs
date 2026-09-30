@@ -44,14 +44,33 @@ variable is visible in `docker inspect` and in the process list, and one of thes
 is write-scoped.
 
 ```bash
-install -d -m 0700 /etc/nachtlabs-mcp
+install -d -m 0750 -o 9000 -g 9000 /etc/nachtlabs-mcp
 printf '%s' 'nl_...' > /etc/nachtlabs-mcp/api-key
 printf '%s' "$(openssl rand -hex 32)" > /etc/nachtlabs-mcp/mcp-token
+chown 9000:9000 /etc/nachtlabs-mcp/api-key /etc/nachtlabs-mcp/mcp-token
 chmod 0400 /etc/nachtlabs-mcp/api-key /etc/nachtlabs-mcp/mcp-token
 ```
 
+**The ownership is not optional.** The image runs as uid 9000, so a root-owned
+`0400` file is unreadable inside the container and every authenticated call answers
+`503 Server credential is not readable`. That was found by running the verification
+script rather than by reading it: the server starts, logs that it is listening, and
+answers nothing but 503s. `chown 9000:9000` fixes it, and `scripts/mcp-verify.sh`
+names this failure specifically.
+
 `nl_...` is the NachtLabs API key, created by an Owner in the browser. The second
 is this server's own token; give it to hermes and to nobody else.
+
+The compose file is the recommended route:
+
+```bash
+NACHTLABS_URL=http://192.168.2.38:3035 \
+  docker compose -f compose.mcp.yaml up -d --build
+
+bash scripts/mcp-verify.sh http://<this-host>:3036
+```
+
+The equivalent bare invocation, if you would rather not use compose:
 
 ```bash
 docker run -d --name nachtlabs-mcp \\
@@ -104,6 +123,34 @@ curl -s -X POST http://127.0.0.1:3036/mcp \\
 
 `tools/list` should answer with seven tools. A 401 on the second call is correct: no
 token was presented.
+
+## Testing a deployment
+
+`scripts/mcp-verify.sh` is the quick check: it runs from outside the container the
+way hermes will, and each failure names its cause. The most common one is a
+credential file the container cannot read, which the script calls out directly.
+
+There is also a live suite that exercises the deployed server and asserts it agrees
+with the real API, which is what catches a wrong path, header or scope name — the
+mistakes that survive unit tests and only appear on a deployment:
+
+```bash
+NACHTLABS_MCP_LIVE_URL=http://<this-host>:3036 \
+NACHTLABS_MCP_LIVE_TOKEN_FILE=/etc/nachtlabs-mcp/mcp-token \
+NACHTLABS_MCP_LIVE_API_KEY=/etc/nachtlabs-mcp/api-key \
+NACHTLABS_MCP_LIVE_PROJECT_ID=<project-uuid> \
+  make test-mcp-live
+```
+
+It is a separate run, not part of `make test`, so the ordinary suite needs no
+deployment. It never submits work: the API key is used to assert the credential's
+own reach, and actual submissions belong to a project and are covered by the
+install's own end-to-end suite.
+
+A failing "reaches the API" with *the key was refused* means the deployment is fine
+and the credential is not. That distinction is the point of the split: a
+deployment that cannot connect and one that connects with a bad key look identical
+from outside unless something says which.
 
 ## Rotating
 

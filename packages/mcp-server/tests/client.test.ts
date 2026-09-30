@@ -356,3 +356,48 @@ describe("credentials", () => {
     expect(c.bind).toBe("127.0.0.1");
   });
 });
+
+describe("unreachable upstream", () => {
+  it("names the host and the reason instead of 'fetch failed'", async () => {
+    // Node reports every transport problem as "fetch failed", which tells an
+    // operator nothing they can act on. The message has to say which host, and
+    // whether the port was closed or the name failed, or it cannot be fixed from
+    // the outside.
+    const refused = new TypeError("fetch failed");
+    Object.assign(refused, { cause: { code: "ECONNREFUSED" } });
+    const { impl } = stubFetch([refused]);
+    const client = new NachtLabs(config(), {
+      fetchImpl: impl,
+      sleep: async () => {},
+    });
+    await expect(client.listProjects()).rejects.toThrow(
+      /connection was refused/,
+    );
+    await expect(client.listProjects()).rejects.toThrow(/nachtlabs\.test/);
+  });
+
+  it("reports an unresolvable name as such", async () => {
+    const noDns = new TypeError("fetch failed");
+    Object.assign(noDns, { cause: { code: "ENOTFOUND" } });
+    const { impl } = stubFetch([noDns]);
+    const client = new NachtLabs(config(), {
+      fetchImpl: impl,
+      sleep: async () => {},
+    });
+    await expect(client.listProjects()).rejects.toThrow(/did not resolve/);
+  });
+
+  it("retries a transport failure before giving up", async () => {
+    const refused = new TypeError("fetch failed");
+    Object.assign(refused, { cause: { code: "ECONNREFUSED" } });
+    const { calls, impl } = stubFetch([refused, ok({ items: [] })]);
+    const client = new NachtLabs(config(), {
+      fetchImpl: impl,
+      sleep: async () => {},
+    });
+    await client.listProjects();
+    // A transport failure may be a request that reached the API and was lost, so
+    // it is worth another attempt rather than being reported immediately.
+    expect(calls).toHaveLength(2);
+  });
+});

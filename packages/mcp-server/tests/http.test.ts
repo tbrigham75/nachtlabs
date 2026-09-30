@@ -238,7 +238,7 @@ describe("over the protocol", () => {
         "run_events",
         "list_projects",
         "list_runs",
-        "get_readiness",
+        "get_installation_status",
       ]),
     );
     await served.close();

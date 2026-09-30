@@ -147,10 +147,41 @@ describe.skipIf(!configured)("a deployed MCP server", () => {
     },
   );
 
-  it("reports provider readiness rather than pretending an endpoint works", async () => {
-    const { payload } = await callTool("get_readiness", {}, 3);
+  it("reports the installation status rather than pretending execution works", async () => {
+    const { payload } = await callTool("get_installation_status", {}, 3);
     expect(JSON.stringify(payload ?? {})).not.toContain("unreachable");
     expect(payload?.result?.isError).not.toBe(true);
+  });
+
+  it("exposes no read tool the credential cannot actually use", async () => {
+    // The one guard that would have caught a human_admin-gated tool shipping in
+    // the list. /llm-readiness was exposed and answered 403 forbidden for every
+    // key; a stubbed API never noticed, so this runs against the real thing and
+    // calls each read tool rather than trusting the tool list.
+    const { payload: listed } = await rpc("tools/list", {});
+    const tools = (listed?.result?.tools ?? []) as Array<{
+      name: string;
+      annotations?: { readOnlyHint?: boolean };
+    }>;
+    const reads = tools.filter((t) => t.annotations?.readOnlyHint === true);
+    expect(reads.length).toBeGreaterThan(3);
+
+    const failures: string[] = [];
+    for (const tool of reads) {
+      const args =
+        tool.name === "list_runs"
+          ? { project_id: "00000000-0000-0000-0000-000000000000" }
+          : {};
+      const { payload } = await callTool(tool.name, args, 90);
+      const body = JSON.stringify(payload ?? {});
+      // "forbidden" and "scope_required" mean the tool is unreachable for the
+      // credential it ships with, which makes it worse than useless: an agent
+      // will keep calling it.
+      if (body.includes("forbidden") || body.includes("scope_required")) {
+        failures.push(`${tool.name}: ${body.slice(0, 120)}`);
+      }
+    }
+    expect(failures).toEqual([]);
   });
 
   it("answers a bad project with a tool error, never a crash or an empty reply", async () => {
@@ -158,9 +189,14 @@ describe.skipIf(!configured)("a deployed MCP server", () => {
     // the key's own project binding, the requirement is the same: the caller gets
     // a readable error rather than an exception, a 500, or silence. Which of the
     // two applies depends on configuration, so neither is asserted here.
+    //
+    // A well-formed UUID, so this exercises the project binding rather than
+    // pydantic. A malformed id is refused as `validation` before any lookup, which
+    // is correct, and an earlier version of this test wrongly expected `not_found`
+    // for it.
     const { payload, text } = await callTool(
       "list_runs",
-      { project_id: "not-a-project-id" },
+      { project_id: "00000000-0000-0000-0000-000000000000" },
       4,
     );
     expect(text.length).toBeGreaterThan(0);

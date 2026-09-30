@@ -203,16 +203,17 @@ export function registerTools(server: McpServer, client: NachtLabs): void {
   );
 
   server.registerTool(
-    "get_readiness",
+    "get_installation_status",
     {
-      title: "Check provider readiness",
+      title: "Check the installation's status",
       description:
-        "Whether the installation can reach a model provider at all. Provider checks " +
-        "are disabled by policy unless an operator has enabled them, and this reports " +
-        "that rather than pretending an endpoint works.",
+        "Whether the worker is alive, and whether execution is available at all. " +
+        "Execution requires an independently qualified Linux executor, which the API " +
+        "does not infer from configuration, so a run submitted here may stop at blocked " +
+        "even when this reports the worker online.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
-    async () => json(await client.readiness()),
+    async () => json(await client.overview()),
   );
 }

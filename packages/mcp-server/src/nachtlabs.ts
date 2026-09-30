@@ -253,8 +253,16 @@ export class NachtLabs {
     return this.request<unknown>("GET", "/api/v1/projects");
   }
 
-  readiness() {
-    return this.request<unknown>("GET", "/api/v1/llm-readiness");
+  /*
+    Not /llm-readiness. That endpoint is human_admin()-gated, so a service account
+    receives 403 forbidden and the tool could never succeed -- which is exactly the
+    mistake this server's tool list was assembled to avoid. It shipped anyway, and
+    only the live suite against a real key caught it: a stubbed API happily
+    answers anything. /overview reports the same thing an agent can act on (worker
+    liveness, and whether execution is available) behind projects:read.
+  */
+  overview() {
+    return this.request<unknown>("GET", "/api/v1/overview");
   }
 
   /** Refuse an out-of-scope project locally, so a mistake names the config. */

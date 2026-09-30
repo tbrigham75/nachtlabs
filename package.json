@@ -1,16 +1,24 @@
 {
-  "name": "nachtlabs", "private": true,
-  "engines": { "node": ">=24 <25", "pnpm": ">=10 <11" },
+  "name": "nachtlabs",
+  "private": true,
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
   "scripts": {
-    "build": "pnpm --filter @nachtlabs/web build",
+    "build": "pnpm --filter @nachtlabs/web build && pnpm --filter @nachtlabs/mcp-server build",
     "dev": "pnpm --filter @nachtlabs/web dev",
-    "typecheck": "pnpm --filter @nachtlabs/web typecheck",
-    "lint": "pnpm --filter @nachtlabs/web lint",
-    "test": "pnpm --filter @nachtlabs/web test",
+    "typecheck": "pnpm --filter @nachtlabs/web typecheck && pnpm --filter @nachtlabs/mcp-server typecheck",
+    "lint": "pnpm --filter @nachtlabs/web lint && pnpm --filter @nachtlabs/mcp-server lint",
+    "test": "pnpm --filter @nachtlabs/web test && pnpm --filter @nachtlabs/mcp-server test",
     "test:e2e": "playwright test",
-    "format:check": "prettier --check apps/web packages/api-client tests/e2e",
+    "format:check": "prettier --check apps/web packages/api-client packages/mcp-server tests/e2e",
     "api:generate": "openapi-typescript docs/api/openapi.json -o packages/api-client/src/generated.d.ts && prettier --write packages/api-client/src/generated.d.ts"
   },
-  "devDependencies": { "@playwright/test": "^1.51.0", "openapi-typescript": "^7.6.1", "prettier": "^3.5.0", "swagger-ui-dist": "^5.0.0" }
+  "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "openapi-typescript": "^7.6.1",
+    "prettier": "^3.5.0",
+    "swagger-ui-dist": "^5.0.0"
+  }
 }
-

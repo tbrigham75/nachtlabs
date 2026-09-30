@@ -1,0 +1,76 @@
+# The MCP server image. Exposes NachtLabs to an external agent over MCP.
+#
+# It runs on its own host, not in the NachtLabs stack, and it is the only client
+# of the API. That is the point of the arrangement: the write-scoped API key
+# exists on this one machine and never travels to an agent, so an agent holding
+# only this server's token cannot reach the API directly.
+#
+# Two build stages because the runtime does not need the TypeScript toolchain or
+# the dependency graph, only the emitted JavaScript and its runtime dependencies.
+
+# syntax=docker/dockerfile:1
+
+ARG NODE_VERSION=24.21.0
+ARG PNPM_VERSION=10.0.0
+
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
+# corepack ships with Node, so pnpm is pinned from the engines field rather than
+# installed from a registry at an unpinned version.
+RUN corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
+WORKDIR /src
+# Every workspace member's manifest, because pnpm resolves the whole workspace
+# before it can filter to one package: with a member missing, the install fails
+# looking for a directory that was never copied.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/
+COPY packages/api-client/package.json packages/api-client/
+COPY packages/mcp-server/package.json packages/mcp-server/
+# --ignore-scripts is deliberate, and is what makes a clean install possible here.
+# pnpm refuses to finish when a dependency ships a build script that is not on the
+# allowlist, and the workspace graph pulls in packages this image does not need.
+# Nothing here needs a postinstall: the build is tsc, which is pure JavaScript,
+# and the runtime dependencies install from their published files. Running third
+# party install scripts is not something to do in the image that holds a
+# write-scoped API key.
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @nachtlabs/mcp-server...
+
+# Source after the install, so an edit here does not re-resolve dependencies. It
+# has to precede the build: tsc has nothing to compile without it.
+COPY packages/mcp-server packages/mcp-server
+RUN pnpm --filter @nachtlabs/mcp-server build \
+ && pnpm --filter @nachtlabs/mcp-server deploy --prod /out
+
+FROM node:${NODE_VERSION}-bookworm-slim AS final
+# Same account and ids as the other images, so the credential files this server
+# reads can be owned consistently alongside them.
+RUN groupadd --system --gid 9000 nachtlabs \
+ && useradd --system --uid 9000 --gid 9000 --home-dir /nonexistent \
+            --shell /usr/sbin/nologin nachtlabs
+
+WORKDIR /app
+# pnpm deploy, not a copy of node_modules. The workspace layout is symlinks into
+# a store one directory up, so copying node_modules between stages silently
+# breaks every one of them: the links resolve, the targets do not, and the failure
+# is ERR_MODULE_NOT_FOUND at start rather than anything that names the cause.
+# deploy emits a self-contained tree with the runtime dependencies only.
+COPY --from=builder --chown=nachtlabs:nachtlabs /out .
+
+ENV NODE_ENV=production \
+    # The code defaults to loopback, which is right on a bare host and useless
+    # here: a published port reaches the container's own interfaces, not its
+    # loopback, so leaving it alone produces a server that starts, logs that it is
+    # listening, and answers nothing at all. This is the explicit choice, and it
+    # is a real one: every host that can reach this port can submit work with the
+    # credentials this container holds. Set NACHTLABS_MCP_BIND to a single address
+    # if the machine has more than one interface, and keep the MCP token file
+    # required and unguessable.
+    NACHTLABS_MCP_BIND=0.0.0.0 \
+    NACHTLABS_MCP_PORT=3036
+USER nachtlabs
+EXPOSE 3036
+# Deliberately does not touch the API: a healthcheck that depends on an upstream
+# turns one slow dependency into a restart loop.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.NACHTLABS_MCP_PORT||3036)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/index.js"]

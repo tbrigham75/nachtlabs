@@ -1,6 +1,7 @@
 packages:
   - apps/web
   - packages/api-client
+  - packages/mcp-server
 onlyBuiltDependencies:
   - sharp
   - esbuild

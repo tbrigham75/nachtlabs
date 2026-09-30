@@ -1,5 +1,24 @@
 [extend]
 useDefault = true
-[allowlist]
+
+# `[[allowlists]]` rather than the singular `[allowlist]`, which is deprecated and
+# cannot be combined with the list form.
+
+[[allowlists]]
 description = "Build dependencies and generated runtime output"
 paths = ['''node_modules/''', '''\.venv/''', '''\.next/''']
+
+# One literal value, and no path condition. gitleaks flags any
+# `curl -H "Authorization: Bearer <value>"` as a credential, and the verification
+# script deliberately sends a wrong token to prove the endpoint rejects it.
+#
+# An earlier version of this entry also named the path, on the reasoning that
+# scoping it that way was narrower. It is not: with both `paths` and `regexes`
+# present the path condition won, and a realistic token pasted into the same file
+# was allowed through. Verified by injecting one and re-scanning. Matching the
+# value alone is the narrowest available, and the placeholder is not a secret in
+# any file.
+[[allowlists]]
+description = "A deliberately invalid placeholder token, in the MCP verification script"
+regexTarget = "match"
+regexes = ['''definitely-not-the-token''']

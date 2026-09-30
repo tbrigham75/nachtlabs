@@ -127,6 +127,15 @@ file is silently discarded. That made an earlier version of this section wrong: 
 to edit a file inside a named volume that the host cannot see. The switches are absent from the
 `environment:` block on purpose, and a test asserts they stay absent.
 
+### Driving it from an external agent
+
+Once the switches are on, a separate agent can submit work through a bearer API
+key rather than the interface. That server is deployed separately, is the only
+client of this API, and holds the write-scoped key so that no agent ever has to.
+See [the MCP server runbook](mcp-server.md), and
+[the agent API contract](../api/agent-api.md) for the routes and the idempotency
+rule if you are writing a client instead.
+
 Then use the setup wizard in the interface: origin, pinned numeric IP, and both permission
 toggles. The address is stored in the database and never written to a file in the repository.
 

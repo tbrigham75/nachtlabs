@@ -19,7 +19,7 @@ from nachtlabs.factory_models import (
 from nachtlabs.integrations.providers import OllamaAdapter
 from nachtlabs.integrations.transport import Endpoint, PinnedJSON
 from nachtlabs.models import IntegrationConnection, ModelProfile, now
-from nachtlabs.security import decrypt
+from nachtlabs.security import decrypt, executor_sign_spec
 from nachtlabs.settings import get_settings
 from nachtlabs.workflows.policy import Plan, VerifierFinding, fingerprint
 from nachtlabs.workflows.state import approval_digest, event, store_evidence
@@ -51,12 +51,19 @@ def queue_executor(db: Session, run: Run, work: WorkRequest, stage: str) -> None
         "policy": policy,
         "plan_digest": run.plan_digest,
     }
+    signer = executor_sign_spec(spec)
+    if signer:
+        spec["channel_signature"] = signer
+    # The digest covers the specification as the executor will see it, with the
+    # signature excluded: it authenticates exactly this field set and cannot be
+    # part of its own input. ADR 0007.
+    body = {k: v for k, v in spec.items() if k != "channel_signature"}
     job = ExecutorJob(
         run_id=run.id,
         stage=stage,
         attempt=run.attempt,
         specification=spec,
-        spec_hash=fingerprint(spec),
+        spec_hash=fingerprint(body),
     )
     db.add(job)
     run.state = "executor_wait"

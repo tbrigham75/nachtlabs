@@ -28,7 +28,7 @@ from nachtlabs.factory_models import (
     WorkRequest,
 )
 from nachtlabs.models import AgentConfiguration, HoldoutContent, ModelProfile, Project, User, now
-from nachtlabs.security import decrypt, encrypt
+from nachtlabs.security import decrypt, encrypt, executor_verify_spec
 from nachtlabs.workflows.engine import delivery_gate, enforce_approval
 from nachtlabs.workflows.policy import fingerprint
 from nachtlabs.workflows.state import current_snapshot, event
@@ -81,7 +81,9 @@ def context_for(
     )
     assert project is not None and policy is not None
     require(
-        job.spec_hash == fingerprint(job.specification)
+        job.spec_hash
+        == fingerprint({k: v for k, v in job.specification.items() if k != "channel_signature"})
+        and executor_verify_spec(job.specification, job.specification.get("channel_signature"))
         and job.specification["policy"] == run.snapshot["policy"]
         and job.specification["candidate"] == run.candidate
         and job.specification["base_commit"] == run.base_commit

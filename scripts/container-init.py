@@ -422,6 +422,16 @@ def main() -> int:
                     )
             rebind["NACHTLABS_ALLOWED_ORIGINS"] = extra
 
+    # Signed worker→executor job channel (ADR 0007, control 4). The HMAC key
+    # is generated here at install time and is never baked into an image:
+    # worker.env signs job rows, executor.env verifies them, so both files
+    # must point at the same credential. Regenerating the key invalidates
+    # every unsigned job row -- expected, and the operator's decision to make.
+    channel_key = CREDENTIALS / "executor-channel-key"
+    channel_key.parent.mkdir(mode=0o700, exist_ok=True)
+    channel_key.write_bytes(base64.b64encode(os.urandom(32)))
+    channel_key.chmod(0o600)
+
     common = {
         "NACHTLABS_ENV": env,
         "NACHTLABS_PUBLIC_URL": public_url,
@@ -445,14 +455,15 @@ def main() -> int:
         },
         0o640,
     )
+    channel_env = {"NACHTLABS_EXECUTOR_CHANNEL_KEY_FILE": str(channel_key)}
     write_env(
         "worker.env",
-        {**common, "NACHTLABS_DATABASE_URL_FILE": str(files["worker"])},
+        {**common, "NACHTLABS_DATABASE_URL_FILE": str(files["worker"]), **channel_env},
         0o640,
     )
     write_env(
         "executor.env",
-        {**common, "NACHTLABS_DATABASE_URL_FILE": str(files["executor"])},
+        {**common, "NACHTLABS_DATABASE_URL_FILE": str(files["executor"]), **channel_env},
         0o640,
     )
     write_env(

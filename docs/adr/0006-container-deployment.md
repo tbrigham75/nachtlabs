@@ -1,5 +1,9 @@
 # ADR 0006: containers for the control plane, native systemd for the executor
 
+Status: **SUPERSEDED (2026-09-30) by [ADR 0007](0007-executor-container-deployment.md)** — the
+executor is now containerized with compensating controls. Tiers 1–2 of this ADR stand; its
+tier-3 "native systemd only" restriction is lifted. The native path remains supported.
+
 Date: 2026-09-28. Supersedes the "no containers in version one" constraint in `Original Prompt` §7 and in `NachtLabs-Implementation-Plan.md:120`, by owner decision.
 
 ## Why this changed

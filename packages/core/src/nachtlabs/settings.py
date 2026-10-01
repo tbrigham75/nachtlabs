@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     master_key_id: str = Field(default="v1", pattern=r"^[A-Za-z0-9_-]{1,40}$")
     previous_master_keys_file: Path | None = None
     integration_network_enabled: bool = False
+    # Optional HMAC key (base64 32 bytes) that signs the executor-job
+    # specification on write and is verified on claim. When unset, the
+    # executor channel runs unsigned (test path). See ADR 0007.
+    executor_channel_key_file: Path | None = None
     git_provider_network_enabled: bool = False
     # Permit cleartext HTTP to a provider on the operator's own network.
     #

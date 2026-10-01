@@ -29,3 +29,7 @@ dist/
 *.egg-info/
 
 /apps/web/public/docs-assets/
+
+# Local credential files for the MCP bridge (contain live API keys, never track)
+bridge/
+*.env

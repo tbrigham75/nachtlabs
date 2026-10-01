@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import secrets
+from pathlib import Path
 from typing import Any
 
 from argon2 import PasswordHasher
@@ -94,3 +95,60 @@ def redact(value: Any) -> Any:
     if isinstance(value, str):
         return value.replace("\n", " ").replace("\r", " ")[:1000]
     return value
+
+
+# --- Executor channel signature (worker -> executor over the shared Postgres
+# queue). The signature proves the job row was enqueued by the trusted worker
+# and not forged / replayed. Key is derived from NACHTLABS_EXECUTOR_CHANNEL_KEY
+# (base64 32 bytes) or the pre-baked key in the shared keyring. Disabled when
+# the setting is absent -- tests can assert both the active and the disabled
+# path without changing production behaviour.
+
+
+def executor_sign(specification: dict[str, Any], key: bytes) -> str:
+    """Signed payload over the stable serialization of a job specification.
+
+    Deterministic: dict keys are sorted, JSON separators are fixed. Any change
+    to the spec (including nested policy objects, candidate digest, attempt,
+    stage, or run_id) changes the signature. The ``channel_signature`` field
+    itself is excluded from the signed body (a signature cannot sign its own
+    field), so signing the spec and signing spec-minus-signature are identical.
+    """
+    body: dict[str, Any] = {k: v for k, v in specification.items() if k != "channel_signature"}
+    message = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def executor_verify(specification: dict[str, Any], signature: str, key: bytes) -> bool:
+    """Constant-time compare of the stored signature against a fresh one."""
+    expected = executor_sign(specification, key)
+    return hmac.compare_digest(expected.encode(), signature.encode())
+
+
+def _executor_channel_key() -> bytes | None:
+    settings = get_settings()
+    path = settings.executor_channel_key_file
+    if path is None:
+        return None
+    p = Path(path)
+    if not p.is_file():
+        return None
+    raw = p.read_bytes().strip()
+    return base64.b64decode(raw, validate=True) if raw else None
+
+
+def executor_sign_spec(specification: dict[str, Any]) -> str | None:
+    """Sign a job specification with the channel key, or None if no key is set."""
+    key = _executor_channel_key()
+    return executor_sign(specification, key) if key else None
+
+
+def executor_verify_spec(specification: dict[str, Any], signature: str | None) -> bool:
+    """Verify a job-row signature. When the channel key is unset the check is
+    skipped (return True) so the disabled path is observable and testable."""
+    if signature is None:
+        return True
+    key = _executor_channel_key()
+    if key is None:
+        return False
+    return executor_verify(specification, signature, key)

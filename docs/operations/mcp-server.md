@@ -19,6 +19,10 @@ The tools stop where the credential stops. There is deliberately no tool for
 creating a project, writing governance, approving a plan or setting the execution
 policy: those need a human browser session, and a test asserts none is offered.
 
+Work in progress and the remaining steps are tracked in
+[the agent-integration handoff](../planning/agent-integration-handoff.md), including
+the behaviours in this file that contradict the obvious reading of the source.
+
 ## What it exposes
 
 | Tool | Purpose |

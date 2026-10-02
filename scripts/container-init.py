@@ -154,6 +154,10 @@ def secret(name: str, value: str, mode: int = 0o600) -> Path:
     """Write once. An existing file is never replaced."""
     path = CREDENTIALS / name
     if path.exists():
+        # A pre-existing file is never rewritten (the install contract above),
+        # but its mode and ownership are re-applied so a restart can self-heal a
+        # mode that was set wrong at first install (e.g. 0600 instead of 0640).
+        path.chmod(mode)
         _own(path)
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +205,9 @@ def build_credentials() -> dict[str, Path]:
     api = secret("api-db", connection("nachtlabs_api", DB_NAME), 0o640)
     worker = secret("worker-db", connection("nachtlabs_worker", DB_NAME), 0o640)
     migrator = secret("migration-db", connection("nachtlabs_migrator", DB_NAME), 0o640)
-    executor = secret("executor-db", connection("nachtlabs_executor", DB_NAME))
+    # 0640, like every peer: 0600 leaves the group read bit unset, so the
+    # worker/executor service (gid 9000) cannot open its own DB URL.
+    executor = secret("executor-db", connection("nachtlabs_executor", DB_NAME), 0o640)
     # The API decrypts stored secrets with this at request time, so it has to be
     # readable by the service account: 0640, group-owned, not writable. The
     # executor and migrator roles do not need it, but the mode is uniform because
@@ -428,9 +434,18 @@ def main() -> int:
     # must point at the same credential. Regenerating the key invalidates
     # every unsigned job row -- expected, and the operator's decision to make.
     channel_key = CREDENTIALS / "executor-channel-key"
-    channel_key.parent.mkdir(mode=0o700, exist_ok=True)
-    channel_key.write_bytes(base64.b64encode(os.urandom(32)))
-    channel_key.chmod(0o600)
+    channel_key.parent.mkdir(mode=0o750, exist_ok=True)
+    if not channel_key.exists():
+        # ADR 0007 (control 4): the worker signs and the executor verifies with
+        # this key. Write once, like secret() -- rotating it on every restart
+        # would invalidate every signed job row, which is an operator action,
+        # never a side effect of a restart.
+        channel_key.write_bytes(base64.b64encode(os.urandom(32)))
+    # 0640 root:<service gid>, group-owned, so BOTH the worker (signer) and the
+    # executor (verifier), running under that gid, can read it. 0600 root:root,
+    # readable by neither, was what disabled the HMAC channel end to end.
+    channel_key.chmod(0o640)
+    _own(channel_key)
 
     common = {
         "NACHTLABS_ENV": env,

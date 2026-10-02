@@ -1,7 +1,8 @@
 # ADR 0007: the executor is containerized, with compensating controls
 
-Date: 2026-09-30. Status: ACCEPTED. Supersedes ADR 0006 (container deployment for the
-control plane, native systemd for the executor).
+Date: 2026-09-30. Status: ACCEPTED (affirmed and extended by ADR 0008, 2026-10-02).
+Supersedes ADR 0006 (container deployment for the control plane, native systemd for the
+executor).
 
 ## Decision
 

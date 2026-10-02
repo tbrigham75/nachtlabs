@@ -44,6 +44,8 @@ services:
     # executor.env after compose sets the container environment, so any
     # NACHTLABS_* key that also appears there is silently discarded. Only keys
     # absent from the generated file are listed here.
+    entrypoint:
+      - /opt/nachtlabs/scripts/with-env.sh
     environment:
       NACHTLABS_CONFIG_DIR: /etc/nachtlabs
       NACHTLABS_ENV_FILE: /etc/nachtlabs/executor.env
@@ -53,6 +55,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+    # The broker's per-job state root (sandbox.ROOT) is a single, known
+    # directory. With a read-only rootfs it cannot mkdir it on start the way
+    # the native host can, so we grant EXACTLY that path as a named volume and
+    # nothing else. This is consistent with the ADR 0007 principle: add the
+    # specific writable mount, not an fs-level opening.
+    volumes:
+      - config:/etc/nachtlabs:ro
+      - executor-state:/var/lib/nachtlabs-executor
     # The image already creates /var/lib/nachtlabs for the control plane roles;
     # the executor's state lives under /var/lib/nachtlabs/executor at runtime
     # and is not required for the broker loop to start.
@@ -82,17 +92,16 @@ services:
       # with its scoped role and read the table it needs. A failure here means
       # either the row set is missing or the role is misgranted.
       test:
-        - CMD
-        - python3
-        - -c
-        - |
-          import sys
-          from nachtlabs.database import session
-          from nachtlabs.models import ExecutorJob
-          with session() as s:
-              s.execute(ExecutorJob.__table__.select().limit(1))
-              sys.exit(0)
+        - CMD-SHELL
+        # POSIX dot-source (image /bin/sh is dash) + set -a so the bare KEY=VALUE lines are
+        # exported to the python3 child (pydantic reads os.environ). with-env.sh does the same.
+        - "set -a; . /etc/nachtlabs/executor.env; set +a; python3 -c \"from nachtlabs.database import session; from nachtlabs.factory_models import ExecutorJob; from sqlalchemy import select; s = session(); row = s.execute(select(ExecutorJob.id).limit(1)).first(); s.close()\""
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+
+volumes:
+  # Writable state root for the executor broker (sandbox.ROOT). Named so it
+  # survives container recreation and is NOT part of the read-only image.
+  executor-state:

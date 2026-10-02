@@ -90,7 +90,7 @@ def invoke(
         "network_disabled",
         "Execution network is disabled",
     )
-    # Each check/agent gets a different copy and a fresh systemd identity.
+    # Each check/agent gets a fresh workspace under 0700 and bounded rlimits.
     with sandbox.Workspace(policy["max_workspace_bytes"]) as workspace:
         sandbox.writable_copy(source, workspace)
         with tempfile.TemporaryDirectory(prefix="input-", dir=sandbox.ROOT) as name:

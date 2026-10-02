@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import signal
 import smtplib
 import ssl
@@ -160,7 +161,8 @@ def main() -> None:
     logging.basicConfig(level=get_settings().log_level, format="%(message)s")
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    logger.info(json.dumps({"service": "worker", "event": "started", "agent_execution": False}))
+    agent_execution = os.environ.get("NACHTLABS_AGENT_EXECUTION", "0") == "1"
+    logger.info(json.dumps({"service": "worker", "event": "started", "agent_execution": agent_execution}))
     while not stop.is_set():
         try:
             tick()

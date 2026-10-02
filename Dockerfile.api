@@ -49,8 +49,20 @@ FROM runtime-base AS final
 # reviewed least-privilege statement set that the application roles depend on.
 # Only the client is installed: no server, and no database in this image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client \
+ && apt-get install -y --no-install-recommends postgresql-client git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+# Model D (ADR 0008): the executor's pinned runtime files. catalog.py resolves
+# every pin as runtime_root + name.lstrip("/") and requires the target to
+# exist, to be a real file (resolve() == itself), and to match its sha256.
+# So the pin targets are real files copied (not symlinked) under
+# /opt/nachtlabs-runtime; the catalog's runtime_root is "/".
+COPY demo/checks/demo_doc.py /opt/checks/src-demo_doc.py
+RUN install -d -m 0755 /opt/nachtlabs-runtime/usr/bin /opt/nachtlabs-runtime/opt/checks \
+ && cp -L /usr/local/bin/python3 /opt/nachtlabs-runtime/usr/bin/python3 \
+ && chmod 0755 /opt/nachtlabs-runtime/usr/bin/python3 \
+ && install -m 0644 /opt/checks/src-demo_doc.py /opt/nachtlabs-runtime/opt/checks/demo_doc.py \
+ && rm -rf /opt/checks
 
 # The service account in the image. The systemd units run these as dedicated
 # non-root accounts with their own writable state directory. A container gets

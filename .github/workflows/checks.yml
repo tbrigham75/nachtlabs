@@ -226,8 +226,22 @@ jobs:
           printf 'postgresql+psycopg://nachtlabs_migrator:ci@127.0.0.1:5432/nachtlabs\n' > "$tmp/db"
           printf 'postgresql+psycopg://nachtlabs_migrator:ci@127.0.0.1:5432/nachtlabs_test\n' > "$tmp/migration-db"
           printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n' > "$tmp/master-key"
-          export NACHTLABS_ENV_FILE="$tmp/env"
-          uv run --no-sync alembic -c apps/api/alembic.ini upgrade head
+          # Source the generated env file into this shell so alembic's
+          # env.py can find its variables. Sourcing (not merely exporting
+          # NACHTLABS_ENV_FILE) is what scripts/with-env.sh does for the
+          # long-running services; this step is one-shot, so it does the
+          # equivalent here. The file points the migration URL at the test
+          # database, so each migration below overrides it for its target.
+          set -a
+          . "$tmp/env"
+          set +a
+          # The grants below run against both databases, so both need the
+          # schema — the same order compose builds it in (migrate, then
+          # schematest). Migrations are idempotent and cheap.
+          NACHTLABS_MIGRATION_DATABASE_URL_FILE="$tmp/db" \
+            uv run --no-sync alembic -c apps/api/alembic.ini upgrade head
+          NACHTLABS_MIGRATION_DATABASE_URL_FILE="$tmp/migration-db" \
+            uv run --no-sync alembic -c apps/api/alembic.ini upgrade head
           # tests/conftest.py reads this one variable and refuses any database
           # whose name does not end in _test, so the suite can never be pointed
           # at the application database.

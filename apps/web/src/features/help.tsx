@@ -62,7 +62,7 @@ type Phase = {
   title: string;
   surface: string;
   done?: boolean;
-  body: (React.ReactNode & { key: any })[] | React.ReactNode;
+  body: React.ReactNode;
 };
 
 function Phase({
@@ -90,13 +90,7 @@ function Phase({
         </div>
       </div>
       <div style={{ display: "grid", gap: 12 }}>
-        {Array.isArray(children)
-          ? children
-          : (
-              <>
-                {children}
-              </>
-            )}
+        {Array.isArray(children) ? children : <>{children}</>}
       </div>
     </section>
   );
@@ -152,8 +146,10 @@ curl -s http://192.168.2.171:11434/v1/models | head`}
             these are on the API AND the worker before you save the connection.
             This is an installation switch, not a wizard field.
           </p>
-          <Code text={`NACHTLABS_INTEGRATION_NETWORK_ENABLED=true
-NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true`} />
+          <Code
+            text={`NACHTLABS_INTEGRATION_NETWORK_ENABLED=true
+NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true`}
+          />
           <p>
             Then <code>docker compose restart api worker</code>, and in the
             wizard (Settings → LLM setup → Model endpoint) save with base URL{" "}
@@ -171,8 +167,8 @@ NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true`} />
       body: (
         <p>
           The worker issues <code>GET /v1/models</code> once and records a
-          probe. A saved connection is not a working one; a successful
-          discovery is the first sign of one.
+          probe. A saved connection is not a working one; a successful discovery
+          is the first sign of one.
         </p>
       ),
     },
@@ -184,18 +180,20 @@ NACHTLABS_INTEGRATION_ALLOW_HTTP_PRIVATE=true`} />
       body: (
         <>
           <p>
-            Three profiles, three roles. <code>require_distinct_models</code>{" "}
-            is always on — implementation and verifier must use two different
+            Three profiles, three roles. <code>require_distinct_models</code> is
+            always on — implementation and verifier must use two different
             models. There is no override.
           </p>
-          <Code text={`implementation · qwen3.8:27b · opencode agent · impl model
+          <Code
+            text={`implementation · qwen3.8:27b · opencode agent · impl model
 verifier     · gemma4:26b  · opencode agent · verifier model   (distinct)
-planning     · qwen3.8:27b · worker-side · Ollama adapter`} />
+planning     · qwen3.8:27b · worker-side · Ollama adapter`}
+          />
           <p>
             An agent row binds an executable (
             <code>/opt/nachtlabs-runtime/bin/opencode</code>, expected version
-            <code> 1.17.13</code>) to a profile. The interface never installs
-            or verifies the binary — that is the operator's attestation.
+            <code> 1.17.13</code>) to a profile. The interface never installs or
+            verifies the binary — that is the operator&apos;s attestation.
           </p>
         </>
       ),
@@ -207,17 +205,20 @@ planning     · qwen3.8:27b · worker-side · Ollama adapter`} />
       body: (
         <>
           <p>
-            Every project has a policy document. It is <code>extra="forbid"</code>:
-            you cannot add keys the release does not know, and it is the scope
-            gate's source of truth.
+            Every project has a policy document. It is{" "}
+            <code>extra=&quot;forbid&quot;</code>: you cannot add keys the
+            release does not know, and it is the scope gate&apos;s source of
+            truth.
           </p>
-          <Code text={`allowed_paths     · ["docs/"]   ← the scope gate whitelist
+          <Code
+            text={`allowed_paths     · ["docs/"]   ← the scope gate whitelist
 max_changed_files · 5
-validation_commands · [["python3", "checks/demo_doc.py"]]`} />
+validation_commands · [["python3", "checks/demo_doc.py"]]`}
+          />
           <p>
             Any changed file outside <code>allowed_paths</code>, or inside a
-            protected directory (<code>.opencode/</code>,{" "}
-            <code>.hermes/</code>, <code>.git</code>), fails the run.
+            protected directory (<code>.opencode/</code>, <code>.hermes/</code>,{" "}
+            <code>.git</code>), fails the run.
           </p>
         </>
       ),
@@ -233,7 +234,8 @@ validation_commands · [["python3", "checks/demo_doc.py"]]`} />
             and the API will refuse to run a job until every one is true on the
             host.
           </p>
-          <Code text={`# 1 — runtime pins (catalog)
+          <Code
+            text={`# 1 — runtime pins (catalog)
 /etc/nachtlabs/execution-catalog.json
   runtime_root  · /opt/nachtlabs-runtime
   runtime_files · bin/opencode   (sha256, real file, no symlink)
@@ -249,7 +251,8 @@ sudo scripts/qualify-executor.py --evidence /path/report.md —confirm-linux-iso
 
 # 3 — egress policy inside the catalog
 allowed_addresses · ["192.168.2.171"]
-allow_private_network · true`} />
+allow_private_network · true`}
+          />
           <p>
             Change any catalog byte and the HMAC breaks: re-mint the receipt or
             the executor will refuse with <code>executor_unqualified</code>.
@@ -266,16 +269,18 @@ allow_private_network · true`} />
           <p>
             Project → New work request → short prompt (
             <code>
-              "Create docs/greeting.md with one line: Hello."
+              &quot;Create docs/greeting.md with one line: Hello.&quot;
             </code>
             ) → submit non-dry-run.
           </p>
-          <Code text={`plan (worker · planning profile) → you approve
+          <Code
+            text={`plan (worker · planning profile) → you approve
   → discovery (executor clones)
   → implementation (opencode · impl model)
   → validation (scope gate · checks · secret scan)
   → verification (opencode · verifier model · writes nachtlabs-verdict.json)
-  → delivery (pr_only · gated)`} />
+  → delivery (pr_only · gated)`}
+          />
           <p>
             The <code>verification</code> stage halts the run here by
             <code> delivery_policy=pr_only</code>. The verdict is available from
@@ -285,7 +290,6 @@ allow_private_network · true`} />
       ),
     },
   ];
-  const highlight = focus ? phases.find((p) => p.n === focus) : null;
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {phases.map((p) => {
@@ -303,12 +307,7 @@ allow_private_network · true`} />
                 : undefined
             }
           >
-            <Phase
-              n={p.n}
-              title={p.title}
-              surface={p.surface}
-              done={p.done}
-            >
+            <Phase n={p.n} title={p.title} surface={p.surface} done={p.done}>
               {p.body}
             </Phase>
           </div>
@@ -343,10 +342,10 @@ export function HelpScreen() {
           </Link>
         </div>
         <p>
-          The full path from a fresh install to a completed run, phase by
-          phase. Each phase says which surface owns the step, what the API
-          enforces, and what the host has to do that the browser cannot.
-          Click a code block to copy it.
+          The full path from a fresh install to a completed run, phase by phase.
+          Each phase says which surface owns the step, what the API enforces,
+          and what the host has to do that the browser cannot. Click a code
+          block to copy it.
         </p>
       </div>
       <Help />

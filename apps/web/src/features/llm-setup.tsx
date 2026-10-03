@@ -55,7 +55,13 @@ import type { Connection, Probe } from "./integration-types";
 */
 
 type Step =
-  "confirm" | "connection" | "discovery" | "profiles" | "agent" | "execution" | "done";
+  | "confirm"
+  | "connection"
+  | "discovery"
+  | "profiles"
+  | "agent"
+  | "execution"
+  | "done";
 
 const steps: { id: Step; title: string }[] = [
   { id: "confirm", title: "Confirm identity" },
@@ -1178,25 +1184,27 @@ function ExecutionStep({ onDone }: { onDone: () => Promise<void> }) {
         </li>
         <li>
           <strong>Qualify the executor.</strong> Run{" "}
-          <code>sudo scripts/qualify-executor.py --evidence /path/report.md --confirm-linux-isolation-passed</code>{" "}
+          <code>
+            sudo scripts/qualify-executor.py --evidence /path/report.md
+            --confirm-linux-isolation-passed
+          </code>{" "}
           with the HMAC key at{" "}
           <code>/etc/nachtlabs/credentials/executor-qualification-key</code>.
-          Follow{" "}
-          <code>docs/operations/executor-qualification.md</code> for the full
-          list of pinned files and the expected report shape.
+          Follow <code>docs/operations/executor-qualification.md</code> for the
+          full list of pinned files and the expected report shape.
         </li>
         <li>
           <strong>Restart the stack.</strong>{" "}
-          <code>docker compose restart executor worker api</code> so the
-          worker picks up the new catalog and the executor image rebuilds
-          cleanly.
+          <code>docker compose restart executor worker api</code> so the worker
+          picks up the new catalog and the executor image rebuilds cleanly.
         </li>
         <li>
           <strong>Submit the first work request.</strong> Go to{" "}
           <code>/work-requests</code> and create the smallest real change you
-          want the executor to make, then watch it under <code>/runs</code>.
-          The expected journey is{" "}
-          <code>planning → approved → implementation_validated → complete</code>.
+          want the executor to make, then watch it under <code>/runs</code>. The
+          expected journey is{" "}
+          <code>planning → approved → implementation_validated → complete</code>
+          .
         </li>
       </ol>
       <div className="actions">
@@ -1204,8 +1212,8 @@ function ExecutionStep({ onDone }: { onDone: () => Promise<void> }) {
       </div>
       <p className="notice">
         The full operator reference — every phase above plus diagnosis and
-        rollback — lives in{" "}
-        <Link href="/help">Help</Link> and in the runbook on the repo root.
+        rollback — lives in <Link href="/help">Help</Link> and in the runbook on
+        the repo root.
       </p>
     </StepPanel>
   );

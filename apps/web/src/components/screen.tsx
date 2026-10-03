@@ -18,6 +18,7 @@ import { AuditScreen } from "@/features/audit";
 import { IntegrationsScreen } from "@/features/integrations";
 import { AgentsModelsScreen } from "@/features/agents-models";
 import { LlmSetupScreen } from "@/features/llm-setup";
+import { HelpScreen } from "@/features/help";
 import { FactoryScreen } from "@/features/factory";
 import { MonitoringScreen } from "@/features/monitoring";
 import { Shell } from "./shell";
@@ -243,6 +244,7 @@ export function Screen() {
   else if (parts[0] === "agents-models")
     content = <AgentsModelsScreen user={user} provider={parts[1]} />;
   else if (parts[0] === "llm-setup") content = <LlmSetupScreen user={user} />;
+  else if (path === "/help") content = <HelpScreen />;
   else if (
     ["work-requests", "runs", "workflows", "regressions"].includes(parts[0])
   )

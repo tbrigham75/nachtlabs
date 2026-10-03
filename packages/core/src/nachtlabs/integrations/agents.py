@@ -85,7 +85,12 @@ class AgentAdapter:
             raise ProviderError("agent_configuration")
         if not 10 <= timeout_seconds <= 3600 or not prompt or len(prompt.encode()) > 65536:
             raise ProviderError("agent_configuration")
-        # Runner creates the fixed input file read-only in a fresh isolated /run mount.
+        # Model D (ADR 0008) runner: the executor container IS the sandbox. There
+        # is no writable /run mount; sandbox.run copies the prompt to
+        # <workspace>/inputs/request.txt and runs with cwd=<workspace>. A relative
+        # path is therefore the only form that resolves (an absolute /run path does
+        # not exist and the read-only rootfs forbids creating it -- opencode exits
+        # 1 with "File not found" on a nonexistent --file target).
         if self.provider == "opencode":
             args = (
                 executable,
@@ -95,12 +100,12 @@ class AgentAdapter:
                 "--model",
                 model,
                 "--file",
-                "/run/nachtlabs/input/request.txt",
+                "inputs/request.txt",
                 "--",
                 "Follow the task in the attached request file.",
             )
             return Invocation(
-                args, b"", timeout_seconds, (("/run/nachtlabs/input/request.txt", prompt.encode()),)
+                args, b"", timeout_seconds, (("inputs/request.txt", prompt.encode()),)
             )
         return Invocation(
             (executable, "chat", "--query-file", "-", "--model", model),

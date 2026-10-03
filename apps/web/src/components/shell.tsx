@@ -15,6 +15,7 @@ import {
   Moon,
   PanelLeftClose,
   LogOut,
+  CircleHelp,
 } from "lucide-react";
 import { api, write, type User } from "@nachtlabs/api-client";
 import { Notifications } from "@/features/monitoring";
@@ -68,6 +69,7 @@ export function Shell({
       : []),
     { href: "/audit-log", title: "Audit log", icon: ShieldCheck },
     { href: "/settings", title: "Settings", icon: Settings },
+    { href: "/help", title: "Help", icon: CircleHelp },
   ];
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {

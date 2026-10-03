@@ -55,7 +55,7 @@ import type { Connection, Probe } from "./integration-types";
 */
 
 type Step =
-  "confirm" | "connection" | "discovery" | "profiles" | "agent" | "done";
+  "confirm" | "connection" | "discovery" | "profiles" | "agent" | "execution" | "done";
 
 const steps: { id: Step; title: string }[] = [
   { id: "confirm", title: "Confirm identity" },
@@ -63,6 +63,7 @@ const steps: { id: Step; title: string }[] = [
   { id: "discovery", title: "Connection check" },
   { id: "profiles", title: "Model profiles" },
   { id: "agent", title: "Coding agent" },
+  { id: "execution", title: "Execution on the host" },
   { id: "done", title: "Summary" },
 ];
 
@@ -354,9 +355,12 @@ export function LlmSetupScreen({ user }: { user: User }) {
           <AgentStep
             state={state}
             guard={guard}
-            onDone={() => setStepAnd("done")}
+            onDone={() => setStepAnd("execution")}
           />
         </div>
+      )}
+      {active === "execution" && (
+        <ExecutionStep onDone={() => setStepAnd("done")} />
       )}
       {active === "done" && <Summary state={state} step={index} />}
       <p className="notice">
@@ -1141,10 +1145,68 @@ function AgentStep({
               await onDone();
             }}
           >
-            Show the summary
+            Continue to execution on the host
           </button>
         </p>
       )}
+    </StepPanel>
+  );
+}
+
+function ExecutionStep({ onDone }: { onDone: () => Promise<void> }) {
+  return (
+    <StepPanel
+      title="Execution on the host"
+      icon={Server}
+      note="Everything above is configuration. Nothing runs until these host steps are done, and this wizard cannot do any of them: it needs root on this host. Do them in order, then reload and the summary below will reflect the new state."
+    >
+      <ol className="checklist">
+        <li>
+          <strong>Enable provider network checks, if still off.</strong> Set{" "}
+          <code>NACHTLABS_INTEGRATION_NETWORK_ENABLED=true</code> in the
+          deployment, then{" "}
+          <code>
+            NACHTLABS_REWRITE_CONFIG=true docker compose run --rm init
+          </code>{" "}
+          and <code>docker compose restart api worker</code>.
+        </li>
+        <li>
+          <strong>Place the runtime files the executor will pin.</strong> Copy
+          the qualification assets (git, python, demo_doc.py, the opencode
+          binary) into <code>/opt/nachtlabs-runtime/</code> so the catalog can
+          resolve them under <code>NACHTLABS_RUNTIME_ROOT</code>.
+        </li>
+        <li>
+          <strong>Qualify the executor.</strong> Run{" "}
+          <code>sudo scripts/qualify-executor.py --evidence /path/report.md --confirm-linux-isolation-passed</code>{" "}
+          with the HMAC key at{" "}
+          <code>/etc/nachtlabs/credentials/executor-qualification-key</code>.
+          Follow{" "}
+          <code>docs/operations/executor-qualification.md</code> for the full
+          list of pinned files and the expected report shape.
+        </li>
+        <li>
+          <strong>Restart the stack.</strong>{" "}
+          <code>docker compose restart executor worker api</code> so the
+          worker picks up the new catalog and the executor image rebuilds
+          cleanly.
+        </li>
+        <li>
+          <strong>Submit the first work request.</strong> Go to{" "}
+          <code>/work-requests</code> and create the smallest real change you
+          want the executor to make, then watch it under <code>/runs</code>.
+          The expected journey is{" "}
+          <code>planning → approved → implementation_validated → complete</code>.
+        </li>
+      </ol>
+      <div className="actions">
+        <Action action={onDone}>Continue to summary</Action>
+      </div>
+      <p className="notice">
+        The full operator reference — every phase above plus diagnosis and
+        rollback — lives in{" "}
+        <Link href="/help">Help</Link> and in the runbook on the repo root.
+      </p>
     </StepPanel>
   );
 }

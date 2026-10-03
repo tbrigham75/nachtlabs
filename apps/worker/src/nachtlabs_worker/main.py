@@ -162,7 +162,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     agent_execution = os.environ.get("NACHTLABS_AGENT_EXECUTION", "0") == "1"
-    logger.info(json.dumps({"service": "worker", "event": "started", "agent_execution": agent_execution}))
+    logger.info(
+        json.dumps({"service": "worker", "event": "started", "agent_execution": agent_execution})
+    )
     while not stop.is_set():
         try:
             tick()

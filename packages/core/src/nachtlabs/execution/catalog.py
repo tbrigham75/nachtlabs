@@ -97,7 +97,8 @@ def trusted_file(path: Path) -> bytes:
     """
     resolved = path
     require(
-        resolved.parent == Path("/etc/nachtlabs") or resolved.parent == Path("/etc/nachtlabs/credentials"),
+        resolved.parent == Path("/etc/nachtlabs")
+        or resolved.parent == Path("/etc/nachtlabs/credentials"),
         409,
         "trusted_file_location",
         "Trusted files must live in /etc/nachtlabs",
@@ -134,13 +135,22 @@ def _verify_receipt(raw_catalog: bytes, receipt: dict[str, Any]) -> None:
     (rehash-collision-resistant), and it is the exact check the
     operator's qualification script produces, so they round-trip.
     """
-    require(receipt.get("qualified") is True, 409, "executor_unqualified", "Operator qualification is required")
-    require(receipt.get("release") == RELEASE, 409, "executor_unqualified", "Operator qualification is required for this exact catalog and release")
+    require(
+        receipt.get("qualified") is True,
+        409,
+        "executor_unqualified",
+        "Operator qualification is required",
+    )
+    require(
+        receipt.get("release") == RELEASE,
+        409,
+        "executor_unqualified",
+        "Operator qualification is required for this exact catalog and release",
+    )
 
     expected_sha = receipt.get("catalog_sha256")
     require(
-        isinstance(expected_sha, str)
-        and hashlib.sha256(raw_catalog).hexdigest() == expected_sha,
+        isinstance(expected_sha, str) and hashlib.sha256(raw_catalog).hexdigest() == expected_sha,
         409,
         "executor_unqualified",
         "Operator qualification is required for this exact catalog and release",
@@ -184,7 +194,9 @@ def catalog() -> dict[str, Any]:
     try:
         receipt = json.loads(receipt_raw)
     except json.JSONDecodeError as exc:
-        raise DomainError(409, "executor_unqualified", "Operator qualification receipt is not valid JSON") from exc
+        raise DomainError(
+            409, "executor_unqualified", "Operator qualification receipt is not valid JSON"
+        ) from exc
     _verify_receipt(raw, receipt)
 
     try:
@@ -220,8 +232,7 @@ def catalog() -> dict[str, Any]:
         )
         target = runtime / name.lstrip("/")
         require(
-            target.resolve() == target
-            and target.is_file(),
+            target.resolve() == target and target.is_file(),
             409,
             "runtime_pin",
             "Runtime pin target unreachable",

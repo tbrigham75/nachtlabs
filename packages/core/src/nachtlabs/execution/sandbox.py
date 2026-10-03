@@ -46,9 +46,9 @@ ACTIVE = ROOT / "active"
 # own memory ceiling is the hard protection; these rlimits are soft
 # defence-in-depth for the job's *own* subprocesses (fork bombs, file
 # writers, etc.).
-_DEFAULT_MAX_FSIZE_BYTES = 256 * 1024 * 1024   # 256 MiB per file
-_DEFAULT_MAX_NOFILE = 1024                      # fd count ceiling
-_DEFAULT_RLIMIT_AS_BYTES = 1024 * 1024 * 1024   # 1 GiB address space
+_DEFAULT_MAX_FSIZE_BYTES = 256 * 1024 * 1024  # 256 MiB per file
+_DEFAULT_MAX_NOFILE = 1024  # fd count ceiling
+_DEFAULT_RLIMIT_AS_BYTES = 1024 * 1024 * 1024  # 1 GiB address space
 # Hard wall-clock grace beyond ``policy.timeout_seconds``: gives the child a
 # chance to SIGTERM itself if it is polling a deadline, before the kernel
 # SIGKILL on timeout. The container's cgroup CPU ceiling is what actually
@@ -71,8 +71,7 @@ def recover() -> None:
         return
     for workspace in ROOT.glob("work-*"):
         require(
-            not workspace.is_symlink()
-            and workspace.resolve().parent == ROOT,
+            not workspace.is_symlink() and workspace.resolve().parent == ROOT,
             409,
             "workspace_recovery",
             "Unexpected workspace recovery path",
@@ -107,7 +106,10 @@ def _job_limits(policy: dict[str, Any]) -> list[tuple[Any, int, int]]:
     nofile = _policy_int("max_nofile", _DEFAULT_MAX_NOFILE)
     soft.append((resource.RLIMIT_NOFILE, nofile, nofile))
 
-    fsize = _policy_int("max_fsize", min(_policy_int("max_workspace_bytes", _DEFAULT_MAX_FSIZE_BYTES), _DEFAULT_MAX_FSIZE_BYTES))
+    fsize = _policy_int(
+        "max_fsize",
+        min(_policy_int("max_workspace_bytes", _DEFAULT_MAX_FSIZE_BYTES), _DEFAULT_MAX_FSIZE_BYTES),
+    )
     soft.append((resource.RLIMIT_FSIZE, fsize, fsize))
 
     as_bytes = _policy_int("max_address_space", _DEFAULT_RLIMIT_AS_BYTES)
@@ -121,6 +123,7 @@ def _preexec(setup: list[tuple[Any, int, int]]) -> Callable[[], None]:
     the forked child, before ``exec``. Running it in the child means the
     parent service does not pick up the job's limits and is not itself
     constrained to a 256 MiB file or a 1 GiB address space."""
+
     def _apply() -> None:  # runs in the child, between fork() and exec()
         for const, soft, hard in setup:
             try:
@@ -198,9 +201,7 @@ def run(
 
     runtime = Path(configuration["runtime_root"])
     require(
-        runtime.is_absolute()
-        and runtime.is_dir()
-        and runtime.resolve() == runtime,
+        runtime.is_absolute() and runtime.is_dir() and runtime.resolve() == runtime,
         409,
         "runtime_root",
         "Runtime root must be a real, absolute directory",
